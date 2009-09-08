@@ -246,6 +246,8 @@ module DataMapper
       def initialize(name, uri_or_options)
         super
 
+        ::Extlib::Pooling.scavenger
+
         # Default the driver-specific logger to DataMapper's logger
         if driver_module = DataObjects.const_get(normalized_uri.scheme.capitalize)
           driver_module.logger = DataMapper.logger if driver_module.respond_to?(:logger=)
