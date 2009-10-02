@@ -241,7 +241,19 @@ module DataMapper
         # TODO: document
         # @api private
         def property_schema_hash(property)
-          schema = (self.class.type_map[property.type] || self.class.type_map[property.primitive]).merge(:name => property.field)
+          # Attempt to address DM Ticket #999, which is ultimately
+          # about dm-more/add-on types not having access to the TEXT
+          # schema primitive (because the Text class primitive is
+          # gone).
+          #
+          # Below makes it possible for types to *inherit* from
+          # existing DM::Types, whose underlying ancestral schema
+          # primitives we can then use instead.
+          #
+          # e.g. class Yaml < ::DataMapper::Types::Text
+          tm     = self.class.type_map
+          schema = (tm.select { |k, v| property.type.ancestors.include?(k) }.flatten.last ||
+                    tm[property.primitive]).merge(:name => property.field)
 
           if property.primitive == String && schema[:primitive] != 'TEXT' && schema[:primitive] != 'CLOB'
             schema[:length] = property.length
