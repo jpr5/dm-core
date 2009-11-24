@@ -30,6 +30,15 @@ require dir / 'model' / 'property'
 
 require dir / 'collection'
 
+require dir / 'type'
+require dir / 'types' / 'boolean'
+require dir / 'types' / 'discriminator'
+require dir / 'types' / 'text'
+require dir / 'types' / 'paranoid_datetime'     # TODO: move to dm-more
+require dir / 'types' / 'paranoid_boolean'      # TODO: move to dm-more
+require dir / 'types' / 'object'
+require dir / 'types' / 'serial'
+
 require dir / 'adapters'
 require dir / 'adapters' / 'abstract_adapter'
 require dir / 'associations' / 'relationship'
@@ -53,21 +62,18 @@ require dir / 'resource'
 require dir / 'support' / 'logger'
 require dir / 'support' / 'naming_conventions'
 require dir / 'transaction'                     # TODO: move to dm-more
-require dir / 'type'
-require dir / 'types' / 'boolean'
-require dir / 'types' / 'discriminator'
-require dir / 'types' / 'text'
-require dir / 'types' / 'paranoid_datetime'     # TODO: move to dm-more
-require dir / 'types' / 'paranoid_boolean'      # TODO: move to dm-more
-require dir / 'types' / 'object'
-require dir / 'types' / 'serial'
 require dir / 'version'
 
+require dir / 'core_ext' / 'enumerable'
 require dir / 'core_ext' / 'kernel'             # TODO: do not load automatically
 require dir / 'core_ext' / 'symbol'             # TODO: do not load automatically
 
 # A logger should always be present. Lets be consistent with DO
 DataMapper::Logger.new(StringIO.new, :fatal)
+
+unless defined?(Infinity)
+  Infinity = 1.0/0
+end
 
 # == Setup and Configuration
 # DataMapper uses URIs or a connection hash to connect to your data-store.
@@ -117,20 +123,19 @@ DataMapper::Logger.new(StringIO.new, :fatal)
 module DataMapper
   extend Extlib::Assertions
 
-  # TODO: move to dm-validations
-  class ValidationError < StandardError; end
-
-  class ObjectNotFoundError < StandardError; end
-
   class RepositoryNotSetupError < StandardError; end
 
   class IncompleteModelError < StandardError; end
 
   class PluginNotFoundError < StandardError; end
 
-  class UpdateConflictError < StandardError; end
-
   class UnknownRelationshipError < StandardError; end
+
+  class ObjectNotFoundError < RuntimeError; end
+
+  class PersistenceError < RuntimeError; end
+
+  class UpdateConflictError < PersistenceError; end
 
   # Raised on attempt to operate on collection of child objects
   # when parent object is not yet saved.
@@ -139,9 +144,8 @@ module DataMapper
   # publications (n:m case), operation cannot be completed
   # because parent object's keys are not yet persisted,
   # and thus there is no FK value to use in the query.
-  class UnsavedParentError < RuntimeError; end
+  class UnsavedParentError < PersistenceError; end
 
-  # TODO: document
   # @api private
   def self.root
     @root ||= Pathname(__FILE__).dirname.parent.expand_path.freeze
@@ -165,10 +169,10 @@ module DataMapper
   #
   # @api public
   def self.setup(*args)
-    adapter = if args.first.kind_of?(Adapters::AbstractAdapter)
-      args.first
-    else
-      DataMapper::Adapters.new(*args)
+    adapter = args.first
+
+    unless adapter.kind_of?(Adapters::AbstractAdapter)
+      adapter = Adapters.new(*args)
     end
 
     Repository.adapters[adapter.name] = adapter
@@ -188,12 +192,17 @@ module DataMapper
   #
   # @api public
   def self.repository(name = nil)
+    context = Repository.context
+
     current_repository = if name
       assert_kind_of 'name', name, Symbol
-      Repository.context.detect { |repository| repository.name == name } || Repository.new(name)
+      context.detect { |repository| repository.name == name }
     else
-      Repository.context.last || Repository.new(Repository.default_name)
+      name = Repository.default_name
+      context.last
     end
+
+    current_repository ||= Repository.new(name)
 
     if block_given?
       current_repository.scope { |*block_args| yield(*block_args) }

@@ -9,6 +9,9 @@ share_examples_for 'A DataObjects Adapter' do
 
     # set up the adapter after switching the logger so queries can be captured
     @adapter = DataMapper.setup(@adapter.name, @adapter.options)
+
+    @mysql      = defined?(DataMapper::Adapters::MysqlAdapter)     && @adapter.kind_of?(DataMapper::Adapters::MysqlAdapter)
+    @sql_server = defined?(DataMapper::Adapters::SqlserverAdapter) && @adapter.kind_of?(DataMapper::Adapters::SqlserverAdapter)
   end
 
   after :all do
@@ -22,7 +25,7 @@ share_examples_for 'A DataObjects Adapter' do
 
   def log_output
     @log.rewind
-    @log.read.chomp.gsub(/^\s+~ \(\d+\.?\d*\)\s+/, '')
+    @log.read.chomp.gsub(/^\s+~ \(\d+\.?\d*\)\s+/, '').split("\n")
   end
 
   def supports_default_values?
@@ -40,11 +43,8 @@ share_examples_for 'A DataObjects Adapter' do
           include DataMapper::Resource
 
           property :id, Serial
-        end
 
-        # create all tables and constraints before each spec
-        if @repository.respond_to?(:auto_migrate!)
-          Article.auto_migrate!
+          auto_migrate!
         end
 
         reset_log
@@ -53,7 +53,7 @@ share_examples_for 'A DataObjects Adapter' do
       end
 
       it 'should not send NULL values' do
-        statement = if defined?(DataMapper::Adapters::MysqlAdapter) && @adapter.kind_of?(DataMapper::Adapters::MysqlAdapter)
+        statement = if @mysql
           /\AINSERT INTO `articles` \(\) VALUES \(\)\z/
         elsif supports_default_values? && supports_returning?
           /\AINSERT INTO "articles" DEFAULT VALUES RETURNING \"id\"\z/
@@ -63,7 +63,7 @@ share_examples_for 'A DataObjects Adapter' do
           /\AINSERT INTO "articles" \(\) VALUES \(\)\z/
         end
 
-        log_output.should =~ statement
+        log_output.first.should =~ statement
       end
     end
 
@@ -74,11 +74,8 @@ share_examples_for 'A DataObjects Adapter' do
 
           property :id,    Serial
           property :title, String
-        end
 
-        # create all tables and constraints before each spec
-        if @repository.respond_to?(:auto_migrate!)
-          Article.auto_migrate!
+          auto_migrate!
         end
 
         reset_log
@@ -87,20 +84,301 @@ share_examples_for 'A DataObjects Adapter' do
       end
 
       it 'should not send NULL values' do
-        if defined?(DataMapper::Adapters::MysqlAdapter) && @adapter.kind_of?(DataMapper::Adapters::MysqlAdapter)
-          log_output.should =~ /^INSERT INTO `articles` \(`id`\) VALUES \(.{1,2}\)$/i
+        regexp = if @mysql
+          /^INSERT INTO `articles` \(`id`\) VALUES \(.{1,2}\)$/i
+        elsif @sql_server
+          /^SET IDENTITY_INSERT \"articles\" ON INSERT INTO "articles" \("id"\) VALUES \(.{1,2}\) SET IDENTITY_INSERT \"articles\" OFF $/i
         else
-          log_output.should =~ /^INSERT INTO "articles" \("id"\) VALUES \(.{1,2}\)$/i
+          /^INSERT INTO "articles" \("id"\) VALUES \(.{1,2}\)$/i
         end
+
+        log_output.first.should =~ regexp
+      end
+    end
+  end
+
+  describe '#select' do
+    before :all do
+      class ::Article
+        include DataMapper::Resource
+
+        property :name,   String, :key => true
+        property :author, String, :required => true
+
+        auto_migrate!
+      end
+
+      @article_model = Article
+
+      @article_model.create(:name => 'Learning DataMapper', :author => 'Dan Kubb')
+    end
+
+    describe 'when one field specified in SELECT statement' do
+      before :all do
+        @return = @adapter.select('SELECT name FROM articles')
+      end
+
+      it 'should return an Array' do
+        @return.should be_kind_of(Array)
+      end
+
+      it 'should have a single result' do
+        @return.size.should == 1
+      end
+
+      it 'should return an Array of values' do
+        @return.should == [ 'Learning DataMapper' ]
+      end
+    end
+
+    describe 'when more than one field specified in SELECT statement' do
+      before :all do
+        @return = @adapter.select('SELECT name, author FROM articles')
+      end
+
+      it 'should return an Array' do
+        @return.should be_kind_of(Array)
+      end
+
+      it 'should have a single result' do
+        @return.size.should == 1
+      end
+
+      it 'should return an Array of Struct objects' do
+        @return.first.should be_kind_of(Struct)
+      end
+
+      it 'should return expected values' do
+        @return.first.values.should == [ 'Learning DataMapper', 'Dan Kubb' ]
       end
     end
   end
 
   describe '#execute' do
-    it 'should allow queries without return results'
+    before :all do
+      class ::Article
+        include DataMapper::Resource
+
+        property :name,   String, :key => true
+        property :author, String, :required => true
+
+        auto_migrate!
+      end
+
+      @article_model = Article
+    end
+
+    before :all do
+      @result = @adapter.execute('INSERT INTO articles (name, author) VALUES(?, ?)', 'Learning DataMapper', 'Dan Kubb')
+    end
+
+    it 'should return a DataObjects::Result' do
+      @result.should be_kind_of(DataObjects::Result)
+    end
+
+    it 'should affect 1 row' do
+      @result.affected_rows.should == 1
+    end
+
+    it 'should not have an insert_id' do
+      pending_if 'Inconsistent insert_id results', !(defined?(DataMapper::Adapters::PostgresAdapter) && @adapter.kind_of?(DataMapper::Adapters::PostgresAdapter)) do
+        @result.insert_id.should be_nil
+      end
+    end
   end
 
-  describe '#query' do
-    it 'should allow queries with return results'
+  describe '#read' do
+    before :all do
+      class ::Article
+        include DataMapper::Resource
+
+        property :name, String, :key => true
+
+        belongs_to :parent, self, :required => false
+        has n, :children, self, :inverse => :parent
+
+        auto_migrate!
+      end
+
+      @article_model = Article
+    end
+
+    describe 'with a raw query' do
+      before :all do
+        @article_model.create(:name => 'Test').should be_saved
+
+        @query = DataMapper::Query.new(@repository, @article_model, :conditions => [ 'name IS NOT NULL' ])
+
+        @return = @adapter.read(@query)
+      end
+
+      it 'should return an Array of Hashes' do
+        @return.should be_kind_of(Array)
+        @return.all? { |entry| entry.should be_kind_of(Hash) }
+      end
+
+      it 'should return expected values' do
+        @return.should == [ { @article_model.properties[:name] => 'Test', @article_model.properties[:parent_name] => nil } ]
+      end
+    end
+
+    describe 'with a raw query with a bind value mismatch' do
+      before :all do
+        @article_model.create(:name => 'Test').should be_saved
+
+        @query = DataMapper::Query.new(@repository, @article_model, :conditions => [ 'name IS NOT NULL', nil ])
+      end
+
+      it 'should raise an error' do
+        lambda {
+          @adapter.read(@query)
+        }.should raise_error(ArgumentError, 'Binding mismatch: 1 for 0')
+      end
+    end
+
+    describe 'with a Collection bind value' do
+      describe 'with an inclusion comparison' do
+        before :all do
+          5.times do |index|
+            @article_model.create(:name => "Test #{index}", :parent => @article_model.last).should be_saved
+          end
+
+          @parents = @article_model.all
+          @query   = DataMapper::Query.new(@repository, @article_model, :parent => @parents)
+
+          @expected = @article_model.all[1, 4].map { |article| article.attributes(:property) }
+        end
+
+        describe 'that is not loaded' do
+          before :all do
+            reset_log
+            @return = @adapter.read(@query)
+          end
+
+          it 'should return an Array of Hashes' do
+            @return.should be_kind_of(Array)
+            @return.all? { |entry| entry.should be_kind_of(Hash) }
+          end
+
+          it 'should return expected values' do
+            @return.should == @expected
+          end
+
+          it 'should execute one subquery' do
+            pending_if @mysql do
+              statement = if @mysql
+                [ 'SELECT `name`, `parent_name` FROM `articles` WHERE `parent_name` IN (SELECT `name` FROM `articles`) ORDER BY `name`' ]
+              else
+                [ 'SELECT "name", "parent_name" FROM "articles" WHERE "parent_name" IN (SELECT "name" FROM "articles") ORDER BY "name"' ]
+              end
+
+              log_output.should == statement
+            end
+          end
+        end
+
+        describe 'that is loaded' do
+          before :all do
+            @parents.to_a  # lazy load the collection
+          end
+
+          before :all do
+            reset_log
+            @return = @adapter.read(@query)
+          end
+
+          it 'should return an Array of Hashes' do
+            @return.should be_kind_of(Array)
+            @return.all? { |entry| entry.should be_kind_of(Hash) }
+          end
+
+          it 'should return expected values' do
+            @return.should == @expected
+          end
+
+          it 'should execute one query' do
+            statement = if @mysql
+              [ %[SELECT `name`, `parent_name` FROM `articles` WHERE `parent_name` IN ('Test 0', 'Test 1', 'Test 2', 'Test 3', 'Test 4') ORDER BY `name`] ]
+            else
+              [ %[SELECT "name", "parent_name" FROM "articles" WHERE "parent_name" IN ('Test 0', 'Test 1', 'Test 2', 'Test 3', 'Test 4') ORDER BY "name"] ]
+            end
+
+            log_output.should == statement
+          end
+        end
+      end
+
+      describe 'with an negated inclusion comparison' do
+        before :all do
+          5.times do |index|
+            @article_model.create(:name => "Test #{index}", :parent => @article_model.last).should be_saved
+          end
+
+          @parents = @article_model.all
+          @query   = DataMapper::Query.new(@repository, @article_model, :parent.not => @parents)
+
+          @expected = []
+        end
+
+        describe 'that is not loaded' do
+          before :all do
+            reset_log
+            @return = @adapter.read(@query)
+          end
+
+          it 'should return an Array of Hashes' do
+            @return.should be_kind_of(Array)
+            @return.all? { |entry| entry.should be_kind_of(Hash) }
+          end
+
+          it 'should return expected values' do
+            @return.should == @expected
+          end
+
+          it 'should execute one subquery' do
+            pending_if @mysql do
+              statement = if @mysql
+                [ 'SELECT `name`, `parent_name` FROM `articles` WHERE NOT(`parent_name` IN (SELECT `name` FROM `articles`)) ORDER BY `name`' ]
+              else
+                [ 'SELECT "name", "parent_name" FROM "articles" WHERE NOT("parent_name" IN (SELECT "name" FROM "articles")) ORDER BY "name"' ]
+              end
+
+              log_output.should == statement
+            end
+          end
+        end
+
+        describe 'that is loaded' do
+          before :all do
+            @parents.to_a  # lazy load the collection
+          end
+
+          before :all do
+            reset_log
+            @return = @adapter.read(@query)
+          end
+
+          it 'should return an Array of Hashes' do
+            @return.should be_kind_of(Array)
+            @return.all? { |entry| entry.should be_kind_of(Hash) }
+          end
+
+          it 'should return expected values' do
+            @return.should == @expected
+          end
+
+          it 'should execute one query' do
+            statement = if @mysql
+              [ %[SELECT `name`, `parent_name` FROM `articles` WHERE NOT(`parent_name` IN ('Test 0', 'Test 1', 'Test 2', 'Test 3', 'Test 4')) ORDER BY `name`] ]
+            else
+              [ %[SELECT "name", "parent_name" FROM "articles" WHERE NOT("parent_name" IN ('Test 0', 'Test 1', 'Test 2', 'Test 3', 'Test 4')) ORDER BY "name"] ]
+            end
+
+            log_output.should == statement
+          end
+        end
+      end
+
+    end
   end
 end

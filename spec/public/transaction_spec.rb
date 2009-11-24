@@ -12,7 +12,10 @@ describe DataMapper::Resource, 'Transactions' do
         property :description, Text
         property :admin,       Boolean, :accessor => :private
 
-        belongs_to :referrer, self, :nullable => true
+        belongs_to :parent, self, :required => false
+        has n, :children, self, :inverse => :parent
+
+        belongs_to :referrer, self, :required => false
         has n, :comments
 
         # FIXME: figure out a different approach than stubbing things out
@@ -51,6 +54,12 @@ describe DataMapper::Resource, 'Transactions' do
       end
     end
 
+    class ::Default
+      include DataMapper::Resource
+
+      property :name, String, :key => true, :default => 'a default value'
+    end
+
     @user_model      = Blog::User
     @author_model    = Blog::Author
     @comment_model   = Blog::Comment
@@ -58,7 +67,7 @@ describe DataMapper::Resource, 'Transactions' do
     @paragraph_model = Blog::Paragraph
   end
 
-  supported_by :postgres, :mysql, :sqlite3, :oracle do
+  supported_by :postgres, :mysql, :sqlite3, :oracle, :sqlserver do
     before :all do
       user = @user_model.create(:name => 'dbussink', :age => 25, :description => 'Test')
 
@@ -84,7 +93,7 @@ describe DataMapper::Resource, 'Transactions' do
     it_should_behave_like 'A Resource supporting Strategic Eager Loading'
   end
 
-  supported_by :postgres, :mysql, :sqlite3, :oracle do
+  supported_by :postgres, :mysql, :sqlite3, :oracle, :sqlserver do
     describe '#transaction' do
       before do
         @user_model.all.destroy!

@@ -12,7 +12,10 @@ describe 'Many to One Associations' do
         property :description, Text
         property :admin,       Boolean, :accessor => :private
 
-        belongs_to :referrer, self, :nullable => true
+        belongs_to :parent, self, :required => false
+        has n, :children, self, :inverse => :parent
+
+        belongs_to :referrer, self, :required => false
         has n, :comments
 
         # FIXME: figure out a different approach than stubbing things out
@@ -49,6 +52,12 @@ describe 'Many to One Associations' do
 
         belongs_to :article
       end
+    end
+
+    class ::Default
+      include DataMapper::Resource
+
+      property :name, String, :key => true, :default => 'a default value'
     end
 
     @user_model      = Blog::User

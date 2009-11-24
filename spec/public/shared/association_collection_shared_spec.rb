@@ -22,10 +22,6 @@ share_examples_for 'It can transfer a Resource from another association' do
     pending if @skip
   end
 
-  it 'should relate the Resource to the Collection' do
-    @resource.collection.should equal(@articles)
-  end
-
   it 'should remove the Resource from the original Collection' do
     pending do
       @original.should_not be_include(@resource)
@@ -64,7 +60,7 @@ share_examples_for 'A public Association Collection' do
         @original = @other_articles
         @resource = @original.first
 
-        rescue_if 'TODO', @skip do
+        rescue_if @skip do
           @return = @articles << @resource
         end
       end
@@ -107,7 +103,7 @@ share_examples_for 'A public Association Collection' do
         @original = @other_articles
         @resource = @original.first
 
-        rescue_if 'TODO', @skip do
+        rescue_if @skip do
           @return = @articles.concat([ @resource ])
         end
       end
@@ -163,7 +159,7 @@ share_examples_for 'A public Association Collection' do
         @original = @other_articles
         @resource = @original.first
 
-        rescue_if 'TODO', @skip do
+        rescue_if @skip do
           @return = @articles.insert(0, @resource)
         end
       end
@@ -226,7 +222,7 @@ share_examples_for 'A public Association Collection' do
         @original = @other_articles
         @resource = @original.first
 
-        rescue_if 'TODO', @skip do
+        rescue_if @skip do
           @return = @articles.push(@resource)
         end
       end
@@ -249,7 +245,7 @@ share_examples_for 'A public Association Collection' do
         @original = @other_articles
         @resource = @original.first
 
-        rescue_if 'TODO', @skip do
+        rescue_if @skip do
           @return = @articles.replace([ @resource ])
         end
       end
@@ -262,10 +258,6 @@ share_examples_for 'A public Association Collection' do
         @return.should equal(@articles)
       end
 
-      it 'should relate the Resource to the Collection' do
-        @resource.collection.should equal(@articles)
-      end
-
       it_should_behave_like 'It can transfer a Resource from another association'
     end
   end
@@ -276,7 +268,7 @@ share_examples_for 'A public Association Collection' do
         @original = @other_articles
         @resource = @original.first
 
-        rescue_if 'TODO', @skip do
+        rescue_if @skip do
           @return = @articles.unshift(@resource)
         end
       end

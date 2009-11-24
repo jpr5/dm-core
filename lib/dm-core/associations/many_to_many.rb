@@ -26,7 +26,6 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api semipublic
         alias target_key child_key
 
@@ -52,17 +51,20 @@ module DataMapper
         def through
           return @through if defined?(@through)
 
-          if options[:through].kind_of?(Associations::Relationship)
-            return @through = options[:through]
+          @through = options[:through]
+
+          if @through.kind_of?(Associations::Relationship)
+            return @through
           end
 
+          model           = source_model
           repository_name = source_repository_name
-          relationships   = source_model.relationships(repository_name)
+          relationships   = model.relationships(repository_name)
           name            = through_relationship_name
 
           @through = relationships[name] ||
             DataMapper.repository(repository_name) do
-              source_model.has(min..max, name, through_model, one_to_many_options)
+              model.has(min..max, name, through_model, one_to_many_options)
             end
 
           @through.child_key
@@ -70,22 +72,25 @@ module DataMapper
           @through
         end
 
-        # TODO: document
         # @api semipublic
         def via
           return @via if defined?(@via)
 
-          if options[:via].kind_of?(Associations::Relationship)
-            return @via = options[:via]
+          @via = options[:via]
+
+          if @via.kind_of?(Associations::Relationship)
+            return @via
           end
 
+          name            = self.name
+          through         = self.through
           repository_name = through.relative_target_repository_name
           through_model   = through.target_model
           relationships   = through_model.relationships(repository_name)
           singular_name   = name.to_s.singularize.to_sym
 
-          @via = relationships[options[:via]] ||
-            relationships[name]               ||
+          @via = relationships[@via] ||
+            relationships[name]      ||
             relationships[singular_name]
 
           @via ||= if anonymous_through_model?
@@ -101,7 +106,6 @@ module DataMapper
           @via
         end
 
-        # TODO: document
         # @api semipublic
         def links
           return @links if defined?(@links)
@@ -120,13 +124,11 @@ module DataMapper
           @links.freeze
         end
 
-        # TODO: document
         # @api private
         def source_scope(source)
           { through.inverse => source }
         end
 
-        # TODO: document
         # @api private
         def query
           # TODO: consider making this a query_for method, so that ManyToMany::Relationship#query only
@@ -152,7 +154,6 @@ module DataMapper
 
         private
 
-        # TODO: document
         # @api private
         def through_model
           namespace, name = through_model_namespace_name
@@ -173,7 +174,6 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api private
         def through_model_namespace_name
           target_parts = target_model.base_model.name.split('::')
@@ -192,7 +192,6 @@ module DataMapper
           return namespace, name
         end
 
-        # TODO: document
         # @api private
         def through_relationship_name
           if anonymous_through_model?
@@ -218,7 +217,39 @@ module DataMapper
           options[:through] == Resource
         end
 
-        # TODO: document
+        # @api private
+        def nearest_relationship
+          return @nearest_relationship if defined?(@nearest_relationship)
+
+          nearest_relationship = self
+
+          while nearest_relationship.respond_to?(:through)
+            nearest_relationship = nearest_relationship.through
+          end
+
+          @nearest_relationship = nearest_relationship
+        end
+
+        # @api private
+        def valid_target?(target)
+          relationship = via
+          source_key   = relationship.source_key
+          target_key   = relationship.target_key
+
+          target.kind_of?(target_model) &&
+          source_key.valid?(target_key.get(target))
+        end
+
+        # @api private
+        def valid_source?(source)
+          relationship = nearest_relationship
+          source_key   = relationship.source_key
+          target_key   = relationship.target_key
+
+          source.kind_of?(source_model) &&
+          target_key.valid?(source_key.get(source))
+        end
+
         # @api semipublic
         chainable do
           def many_to_one_options
@@ -226,7 +257,6 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api semipublic
         chainable do
           def one_to_many_options
@@ -241,13 +271,11 @@ module DataMapper
           self.class
         end
 
-        # TODO: document
         # @api private
         def invert
           inverse_class.new(inverse_name, parent_model, child_model, inverted_options)
         end
 
-        # TODO: document
         # @api private
         def inverted_options
           links   = self.links.dup
@@ -263,6 +291,8 @@ module DataMapper
               inverse.options.merge(:through => through)
             )
           end
+
+          options = self.options
 
           options.only(*OPTIONS - [ :min, :max ]).update(
             :through    => through,
@@ -312,7 +342,7 @@ module DataMapper
           # the intermediaries are removed
           lazy_load
 
-          unless intermediaries.destroy
+          unless intermediaries.all(via => self).destroy
             return false
           end
 
@@ -332,45 +362,71 @@ module DataMapper
         def destroy!
           assert_source_saved 'The source must be saved before mass-deleting the collection'
 
-          # make sure the records are loaded so they can be found when
-          # the intermediaries are removed
-          lazy_load
+          model      = self.model
+          key        = model.key(repository_name)
+          conditions = Query.target_conditions(self, key, key)
 
-          unless intermediaries.destroy!
+          unless intermediaries.all(via => self).destroy!
             return false
           end
 
-          super
+          unless model.all(:repository => repository, :conditions => conditions).destroy!
+            return false
+          end
+
+          each { |resource| resource.reset }
+          clear
+
+          true
         end
 
-        # Return the intermediaries between the source and the targets
+        # Return the intermediaries linking the source to the targets
         #
         # @return [Collection]
         #   the intermediary collection
         #
         # @api public
         def intermediaries
-          return @intermediaries if @intermediaries
+          through = self.through
+          source  = self.source
 
-          intermediaries = if through.loaded?(source)
+          @intermediaries ||= if through.loaded?(source)
             through.get!(source)
           else
-            through.set!(source, through.collection_for(source))
+            reset_intermediaries
           end
+        end
 
-          scoped = intermediaries.all(via => self)
+        protected
 
-          @intermediaries = scoped.query == intermediaries.query ? intermediaries : scoped
+        # Map the resources in the collection to the intermediaries
+        #
+        # @return [Hash]
+        #   the map of resources to their intermediaries
+        #
+        # @api private
+        def intermediary_for
+          @intermediary_for ||= {}
+        end
+
+        # @api private
+        def through
+          relationship.through
+        end
+
+        # @api private
+        def via
+          relationship.via
         end
 
         private
 
-        # TODO: document
         # @api private
         def _create(safe, attributes)
+          via = self.via
           if via.respond_to?(:resource_for)
             resource = super
-            if create_intermediary(safe, via => resource)
+            if create_intermediary(safe, resource)
               resource
             end
           else
@@ -380,21 +436,23 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api private
         def _save(safe)
+          via = self.via
+
           if @removed.any?
             # delete only intermediaries linked to the removed targets
-            removed_intermediaries = intermediaries.all(via => @removed).each do |resource|
-              intermediaries.delete(resource)
-            end
+            return false unless intermediaries.all(via => @removed).send(safe ? :destroy : :destroy!)
 
-            return false unless removed_intermediaries.send(safe ? :destroy : :destroy!)
+            # reset the intermediaries so that it reflects the current state of the datastore
+            reset_intermediaries
           end
+
+          loaded_entries = self.loaded_entries
 
           if via.respond_to?(:resource_for)
             super
-            loaded_entries.all? { |resource| create_intermediary(safe, via => resource) }
+            loaded_entries.all? { |resource| create_intermediary(safe, resource) }
           else
             if intermediary = create_intermediary(safe)
               inverse = via.inverse
@@ -405,32 +463,36 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api private
-        def create_intermediary(safe, attributes = {})
-          collection = intermediaries
+        def create_intermediary(safe, resource = nil)
+          intermediary_for = self.intermediary_for
 
-          return unless collection.send(safe ? :save : :save!)
+          intermediary_resource = intermediary_for[resource]
+          return intermediary_resource if intermediary_resource
 
-          intermediary = collection.first(attributes) ||
-                         collection.send(safe ? :create : :create!, attributes)
+          intermediaries = self.intermediaries
+          method         = safe ? :save : :save!
 
-          return intermediary if intermediary.saved?
+          return unless intermediaries.send(method)
+
+          attributes = {}
+          attributes[via] = resource if resource
+
+          intermediary = intermediaries.first_or_new(attributes)
+          return unless intermediary.__send__(method)
+
+          # map the resource, even if it is nil, to the intermediary
+          intermediary_for[resource] = intermediary
         end
 
-        # TODO: document
         # @api private
-        def through
-          relationship.through
+        def reset_intermediaries
+          through = self.through
+          source  = self.source
+
+          through.set!(source, through.collection_for(source))
         end
 
-        # TODO: document
-        # @api private
-        def via
-          relationship.via
-        end
-
-        # TODO: document
         # @api private
         def inverse_set(*)
           # do nothing

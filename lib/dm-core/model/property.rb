@@ -50,7 +50,10 @@ module DataMapper
       def property(name, type, options = {})
         property = DataMapper::Property.new(self, name, type, options)
 
-        properties(repository_name) << property
+        repository_name = self.repository_name
+        properties      = properties(repository_name)
+
+        properties << property
 
         # Add property to the other mappings as well if this is for the default
         # repository.
@@ -72,8 +75,6 @@ module DataMapper
         if property.lazy?
           context = options.fetch(:lazy, :default)
           context = :default if context == true
-
-          properties = properties(repository_name)
 
           Array(context).each do |context|
             properties.lazy_context(context) << self
@@ -109,6 +110,8 @@ module DataMapper
         # new Relationship objects to a supplied repository and model.  dup does not really
         # do what is needed
 
+        default_repository_name = self.default_repository_name
+
         @properties[repository_name] ||= if repository_name == default_repository_name
           PropertySet.new
         else
@@ -129,7 +132,6 @@ module DataMapper
         properties(repository_name).key
       end
 
-      # TODO: document
       # @api public
       def serial(repository_name = default_repository_name)
         key(repository_name).detect { |property| property.serial? }
@@ -149,7 +151,6 @@ module DataMapper
         @field_naming_conventions[repository_name] ||= repository(repository_name).adapter.field_naming_convention
       end
 
-      # TODO: document
       # @api private
       def properties_with_subclasses(repository_name = default_repository_name)
         properties = PropertySet.new
@@ -163,22 +164,19 @@ module DataMapper
         properties
       end
 
-      # TODO: document
       # @api private
       def paranoid_properties
         @paranoid_properties
       end
 
-      # TODO: document
       # @api private
       def set_paranoid_property(name, &block)
         paranoid_properties[name] = block
       end
 
-      # TODO: document
       # @api private
       def key_conditions(repository, key)
-        self.key(repository.name).zip(key).to_hash
+        self.key(repository.name).zip(key.nil? ? [] : key).to_hash
       end
 
       private
@@ -232,7 +230,6 @@ module DataMapper
       end
 
       chainable do
-        # TODO: document
         # @api public
         def method_missing(method, *args, &block)
           if property = properties(repository_name)[method]

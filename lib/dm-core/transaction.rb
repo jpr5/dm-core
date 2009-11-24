@@ -4,6 +4,29 @@ module DataMapper
   class Transaction
     extend Chainable
 
+    # @api private
+    attr_accessor :state
+
+    # @api private
+    def none?
+      state == :none
+    end
+
+    # @api private
+    def begin?
+      state == :begin
+    end
+
+    # @api private
+    def rollback?
+      state == :rollback
+    end
+
+    # @api private
+    def commit?
+      state == :commit
+    end
+
     # Create a new Transaction
     #
     # @see Transaction#link
@@ -14,7 +37,7 @@ module DataMapper
     # @api public
     def initialize(*things)
       @transaction_primitives = {}
-      @state = :none
+      self.state = :none
       @adapters = {}
       link(*things)
       if block_given?
@@ -44,8 +67,8 @@ module DataMapper
     #
     # @api private
     def link(*things)
-      unless @state == :none
-        raise "Illegal state for link: #{@state}"
+      unless none?
+        raise "Illegal state for link: #{state}"
       end
 
       things.each do |thing|
@@ -78,13 +101,13 @@ module DataMapper
     #
     # @api private
     def begin
-      unless @state == :none
-        raise "Illegal state for begin: #{@state}"
+      unless none?
+        raise "Illegal state for begin: #{state}"
       end
 
       each_adapter(:connect_adapter, [:log_fatal_transaction_breakage])
       each_adapter(:begin_adapter, [:rollback_and_close_adapter_if_begin, :close_adapter_if_none])
-      @state = :begin
+      self.state = :begin
     end
 
     # Commit the transaction
@@ -99,33 +122,33 @@ module DataMapper
     # @api private
     def commit
       if block_given?
-        unless @state == :none
-          raise "Illegal state for commit with block: #{@state}"
+        unless none?
+          raise "Illegal state for commit with block: #{state}"
         end
 
         begin
           self.begin
           rval = within { |*block_args| yield(*block_args) }
         rescue Exception => exception
-          if @state == :begin
-            self.rollback
+          if begin?
+            rollback
           end
           raise exception
         ensure
           unless exception
-            if @state == :begin
-              self.commit
+            if begin?
+              commit
             end
             return rval
           end
         end
       else
-        unless @state == :begin
-          raise "Illegal state for commit without block: #{@state}"
+        unless begin?
+          raise "Illegal state for commit without block: #{state}"
         end
         each_adapter(:commit_adapter, [:log_fatal_transaction_breakage])
         each_adapter(:close_adapter, [:log_fatal_transaction_breakage])
-        @state = :commit
+        self.state = :commit
       end
     end
 
@@ -135,12 +158,12 @@ module DataMapper
     #
     # @api private
     def rollback
-      unless @state == :begin
-        raise "Illegal state for rollback: #{@state}"
+      unless begin?
+        raise "Illegal state for rollback: #{state}"
       end
       each_adapter(:rollback_adapter_if_begin, [:rollback_and_close_adapter_if_begin, :close_adapter_if_none])
       each_adapter(:close_adapter_if_open, [:log_fatal_transaction_breakage])
-      @state = :rollback
+      self.state = :rollback
     end
 
     # Execute a block within this Transaction.
@@ -158,52 +181,41 @@ module DataMapper
         raise 'No block provided'
       end
 
-      unless @state == :begin
-        raise "Illegal state for within: #{@state}"
+      unless begin?
+        raise "Illegal state for within: #{state}"
       end
 
-      @adapters.each do |adapter, state|
+      adapters = @adapters
+
+      adapters.each_key do |adapter|
         adapter.push_transaction(self)
       end
 
       begin
         yield self
       ensure
-        @adapters.each do |adapter, state|
+        adapters.each_key do |adapter|
           adapter.pop_transaction
         end
       end
     end
 
-    # TODO: document
     # @api private
-    def method_missing(meth, *args, &block)
-      if args.size == 1 && args.first.kind_of?(Adapters::AbstractAdapter)
-        if (match = meth.to_s.match(/^(.*)_if_(none|begin|rollback|commit)$/))
-          if self.respond_to?(match[1], true)
-            if state_for(args.first).to_s == match[2]
-              self.send(match[1], args.first)
-            end
-          else
-            super
-          end
-        elsif (match = meth.to_s.match(/^(.*)_unless_(none|begin|rollback|commit)$/))
-          if self.respond_to?(match[1], true)
-            unless state_for(args.first).to_s == match[2]
-              self.send(match[1], args.first)
-            end
-          else
-            super
-          end
-        else
-          super
-        end
-      else
-        super
-      end
+    def method_missing(method, *args, &block)
+      first_arg = args.first
+
+      return super unless args.size == 1 && first_arg.kind_of?(Adapters::AbstractAdapter)
+      return super unless match = method.to_s.match(/\A(.*)_(if|unless)_(none|begin|rollback|commit)\z/)
+
+      action, condition, expected_state = match.captures
+      return super unless respond_to?(action, true)
+
+      state   = state_for(first_arg).to_s
+      execute = (condition == 'if') == (state == expected_state)
+
+      send(action, first_arg) if execute
     end
 
-    # TODO: document
     # @api private
     def primitive_for(adapter)
       unless @adapters.include?(adapter)
@@ -219,7 +231,6 @@ module DataMapper
 
     private
 
-    # TODO: document
     # @api private
     def validate_primitive(primitive)
       [:close, :begin, :rollback, :commit].each do |meth|
@@ -231,18 +242,18 @@ module DataMapper
       primitive
     end
 
-    # TODO: document
     # @api private
     def each_adapter(method, on_fail)
+      adapters = @adapters
       begin
-        @adapters.each do |adapter, state|
-          self.send(method, adapter)
+        adapters.each_key do |adapter|
+          send(method, adapter)
         end
       rescue Exception => exception
-        @adapters.each do |adapter, state|
+        adapters.each_key do |adapter|
           on_fail.each do |fail_handler|
             begin
-              self.send(fail_handler, adapter)
+              send(fail_handler, adapter)
             rescue Exception => inner_exception
               DataMapper.logger.fatal("#{self}#each_adapter(#{method.inspect}, #{on_fail.inspect}) failed with #{exception.inspect}: #{exception.backtrace.join("\n")} - and when sending #{fail_handler} to #{adapter} we failed again with #{inner_exception.inspect}: #{inner_exception.backtrace.join("\n")}")
             end
@@ -252,7 +263,6 @@ module DataMapper
       end
     end
 
-    # TODO: document
     # @api private
     def state_for(adapter)
       unless @adapters.include?(adapter)
@@ -262,15 +272,16 @@ module DataMapper
       @adapters[adapter]
     end
 
-    # TODO: document
     # @api private
     def do_adapter(adapter, what, prerequisite)
       unless @transaction_primitives.include?(adapter)
         raise "No primitive for #{adapter}"
       end
 
-      unless state_for(adapter) == prerequisite
-        raise "Illegal state for #{what}: #{state_for(adapter)}"
+      state = state_for(adapter)
+
+      unless state == prerequisite
+        raise "Illegal state for #{what}: #{state}"
       end
 
       DataMapper.logger.debug("#{adapter.name}: #{what}")
@@ -278,13 +289,11 @@ module DataMapper
       @adapters[adapter] = what
     end
 
-    # TODO: document
     # @api private
     def log_fatal_transaction_breakage(adapter)
       DataMapper.logger.fatal("#{self} experienced a totally broken transaction execution. Presenting member #{adapter.inspect}.")
     end
 
-    # TODO: document
     # @api private
     def connect_adapter(adapter)
       if @transaction_primitives.key?(adapter)
@@ -294,7 +303,6 @@ module DataMapper
       @transaction_primitives[adapter] = validate_primitive(adapter.transaction_primitive)
     end
 
-    # TODO: document
     # @api private
     def close_adapter_if_open(adapter)
       if @transaction_primitives.include?(adapter)
@@ -302,7 +310,6 @@ module DataMapper
       end
     end
 
-    # TODO: document
     # @api private
     def close_adapter(adapter)
       unless @transaction_primitives.include?(adapter)
@@ -313,25 +320,21 @@ module DataMapper
       @transaction_primitives.delete(adapter)
     end
 
-    # TODO: document
     # @api private
     def begin_adapter(adapter)
       do_adapter(adapter, :begin, :none)
     end
 
-    # TODO: document
     # @api private
     def commit_adapter(adapter)
       do_adapter(adapter, :commit, :begin)
     end
 
-    # TODO: document
     # @api private
     def rollback_adapter(adapter)
       do_adapter(adapter, :rollback, :begin)
     end
 
-    # TODO: document
     # @api private
     def rollback_and_close_adapter(adapter)
       rollback_adapter(adapter)
@@ -341,7 +344,6 @@ module DataMapper
     module Adapter
       extend Chainable
 
-      # TODO: document
       # @api private
       def self.included(base)
         [ :Repository, :Model, :Resource ].each do |name|
@@ -405,13 +407,11 @@ module DataMapper
       chainable do
         protected
 
-        # TODO: document
         # @api semipublic
         def open_connection
           current_connection || super
         end
 
-        # TODO: document
         # @api semipublic
         def close_connection(connection)
           unless current_connection == connection
@@ -422,7 +422,6 @@ module DataMapper
 
       private
 
-      # TODO: document
       # @api private
       def transactions
         Thread.current[:dm_transactions] ||= []
@@ -442,7 +441,7 @@ module DataMapper
     end # module Adapter
 
     # alias the MySQL, PostgreSQL, Sqlite3 and Oracle adapters to use transactions
-    MysqlAdapter = PostgresAdapter = Sqlite3Adapter = OracleAdapter = Adapter
+    MysqlAdapter = PostgresAdapter = Sqlite3Adapter = OracleAdapter = SqlserverAdapter = Adapter
 
     module Repository
 
@@ -459,7 +458,6 @@ module DataMapper
     end # module Repository
 
     module Model
-      # TODO: document
       # @api private
       def self.included(mod)
         mod.descendants.each { |model| model.extend self }
@@ -496,7 +494,6 @@ module DataMapper
   module Adapters
     extendable do
 
-      # TODO: document
       # @api private
       def const_added(const_name)
         if Transaction.const_defined?(const_name)

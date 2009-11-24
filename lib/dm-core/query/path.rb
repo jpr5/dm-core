@@ -14,19 +14,15 @@ module DataMapper
 
       equalize :relationships, :property
 
-      # TODO: document
       # @api semipublic
       attr_reader :repository_name
 
-      # TODO: document
       # @api semipublic
       attr_reader :relationships
 
-      # TODO: document
       # @api semipublic
       attr_reader :model
 
-      # TODO: document
       # @api semipublic
       attr_reader :property
 
@@ -39,19 +35,16 @@ module DataMapper
         RUBY
       end
 
-      # TODO: document
       # @api public
       def kind_of?(klass)
         super || (defined?(@property) ? @property.kind_of?(klass) : false)
       end
 
-      # TODO: document
       # @api public
       def instance_of?(klass)
         super || (defined?(@property) ? @property.instance_of?(klass) : false)
       end
 
-      # TODO: document
       # @api semipublic
       def respond_to?(method, include_private = false)
         super                                                                   ||
@@ -62,7 +55,6 @@ module DataMapper
 
       private
 
-      # TODO: document
       # @api semipublic
       def initialize(relationships, property_name = nil)
         assert_kind_of 'relationships', relationships, Array
@@ -80,19 +72,20 @@ module DataMapper
         end
       end
 
-      # TODO: document
       # @api semipublic
       def method_missing(method, *args)
         if @property
           return @property.send(method, *args)
         end
 
+        path_class = self.class
+
         if relationship = @model.relationships(@repository_name)[method]
-          return self.class.new(@relationships.dup << relationship)
+          return path_class.new(@relationships.dup << relationship)
         end
 
         if @model.properties(@repository_name).named?(method)
-          return self.class.new(@relationships, method)
+          return path_class.new(@relationships, method)
         end
 
         raise NoMethodError, "undefined property or relationship '#{method}' on #{@model}"

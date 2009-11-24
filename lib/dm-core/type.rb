@@ -84,20 +84,18 @@ module DataMapper
   #   end # module Types
   # end # module DataMapper
   class Type
-
     # Until cooperation of Property and Type does not change, each must
     # have a separate list of options, because plugins (ex.: dm-validations)
     # may want to extend one or the other, and expects no side effects
     PROPERTY_OPTIONS = [
       :accessor, :reader, :writer,
-      :lazy, :default, :nullable, :key, :serial, :field, :size, :length,
+      :lazy, :default, :key, :serial, :field, :size, :length,
       :format, :index, :unique_index, :auto_validation,
-      :validates, :unique, :precision, :scale, :min, :max
+      :validates, :unique, :precision, :scale, :min, :max,
+      :allow_nil, :allow_blank, :required
     ]
 
     class << self
-
-      # TODO: document
       # @api private
       def configure(primitive_type, options)
         warn "DataMapper.Type.configure is deprecated, specify the primitive and options explicitly (#{caller[0]})"
@@ -126,6 +124,16 @@ module DataMapper
       def primitive(primitive = nil)
         return @primitive if primitive.nil?
         @primitive = primitive
+
+        return unless @primitive.respond_to?(:options)
+        options = @primitive.options
+
+        return unless options.respond_to?(:each)
+
+        # inherit the options from the primitive if any
+        options.each do |key, value|
+          send(key, value) unless send(key)
+        end
       end
 
       # Load Property options
@@ -139,6 +147,12 @@ module DataMapper
             end                                                          #   end
           end                                                            # end
         RUBY
+      end
+
+      def nullable(value)
+        # :required is preferable to :allow_nil, but :nullable maps precisely to :allow_nil
+        warn "#nullable is deprecated, use #required instead (#{caller[0]})"
+        allow_nil(value)
       end
 
       # Gives all the options set on this type

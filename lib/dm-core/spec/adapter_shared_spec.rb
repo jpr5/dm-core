@@ -173,6 +173,21 @@ share_examples_for 'An Adapter' do
             Heffalump.all(:color.not => nil).should_not be_include(@two)
           end
 
+          it 'should be able to search for object with a nil value using required properties' do
+            Heffalump.all(:id.not => nil).should == [ @red, @two, @five ]
+          end
+
+          it 'should be able to search for objects not in an empty list (match all)' do
+            Heffalump.all(:color.not => []).should == [ @red, @two, @five ]
+          end
+
+          it 'should be able to search for objects in an empty list and another OR condition (match none on the empty list)' do
+            Heffalump.all(:conditions => DataMapper::Query::Conditions::Operation.new(
+                                           :or,
+                                           DataMapper::Query::Conditions::Comparison.new(:in, Heffalump.properties[:color], []),
+                                           DataMapper::Query::Conditions::Comparison.new(:in, Heffalump.properties[:num_spots], [5]))).should == [ @five ]
+          end
+
           it 'should be able to search for objects not included in an array of values' do
             Heffalump.all(:num_spots.not => [ 1, 3, 5, 7 ]).should be_include(@two)
           end
@@ -210,7 +225,8 @@ share_examples_for 'An Adapter' do
 
         describe 'regexp' do
           before do
-            if defined?(DataMapper::Adapters::Sqlite3Adapter) && @adapter.kind_of?(DataMapper::Adapters::Sqlite3Adapter)
+            if (defined?(DataMapper::Adapters::Sqlite3Adapter) && @adapter.kind_of?(DataMapper::Adapters::Sqlite3Adapter) ||
+                defined?(DataMapper::Adapters::SqlserverAdapter) && @adapter.kind_of?(DataMapper::Adapters::SqlserverAdapter))
               pending 'delegate regexp matches to same system that the InMemory and YAML adapters use'
             end
           end

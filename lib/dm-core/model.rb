@@ -50,7 +50,7 @@ module DataMapper
     # @return [DescendantSet]
     #   Set containing the descendant models
     #
-    # @api private
+    # @api semipublic
     def self.descendants
       @descendants ||= DescendantSet.new
     end
@@ -69,7 +69,7 @@ module DataMapper
     # @return [Set]
     #   Set containing the descendant classes
     #
-    # @api private
+    # @api semipublic
     attr_reader :descendants
 
     # Appends a module for inclusion into the model class after Resource.
@@ -86,6 +86,12 @@ module DataMapper
     # @api semipublic
     def self.append_inclusions(*inclusions)
       extra_inclusions.concat inclusions
+
+      # Add the inclusion to existing descendants
+      descendants.each do |model|
+        inclusions.each { |inclusion| model.send :include, inclusion }
+      end
+
       true
     end
 
@@ -111,6 +117,12 @@ module DataMapper
     # @api semipublic
     def self.append_extensions(*extensions)
       extra_extensions.concat extensions
+
+      # Add the extension to existing descendants
+      descendants.each do |model|
+        extensions.each { |extension| model.extend(extension) }
+      end
+
       true
     end
 
@@ -123,9 +135,10 @@ module DataMapper
       @extra_extensions ||= []
     end
 
-    # TODO: document
     # @api private
     def self.extended(model)
+      descendants = self.descendants
+
       descendants << model
 
       model.instance_variable_set(:@valid,         false)
@@ -138,10 +151,11 @@ module DataMapper
       extra_inclusions.each { |mod| model.send(:include, mod) }
     end
 
-    # TODO: document
     # @api private
     chainable do
       def inherited(model)
+        descendants = self.descendants
+
         descendants << model
 
         model.instance_variable_set(:@valid,         false)
@@ -192,12 +206,14 @@ module DataMapper
     # @param [Object] *key
     #   The primary key or keys to use for lookup
     #
-    # @return [Resource,NilClass]
+    # @return [Resource, nil]
     #   A single model that was found
     #   If no instance was found matching +key+
     #
     # @api public
     def get(*key)
+      assert_valid_key_size(key)
+
       repository = self.repository
       key        = self.key(repository.name).typecast(key)
 
@@ -256,6 +272,8 @@ module DataMapper
     #
     # @api public
     def all(query = nil)
+      # TODO: update this not to accept a nil value, and instead either
+      # accept a Hash/Query and nothing else
       if query.nil? || (query.kind_of?(Hash) && query.empty?)
         # TODO: after adding Enumerable methods to Model, try to return self here
         new_collection(self.query.dup)
@@ -282,22 +300,18 @@ module DataMapper
     #
     # @api public
     def first(*args)
-      last_arg = args.last
+      first_arg = args.first
+      last_arg  = args.last
 
-      limit      = args.first if args.first.kind_of?(Integer)
-      with_query = last_arg.respond_to?(:merge) && !last_arg.blank?
+      limit_specified = first_arg.kind_of?(Integer)
+      with_query      = (last_arg.kind_of?(Hash) && !last_arg.empty?) || last_arg.kind_of?(Query)
 
-      query = with_query ? last_arg : {}
+      limit = limit_specified ? first_arg : 1
+      query = with_query      ? last_arg  : {}
 
-      query = if query.kind_of?(Query)
-        query.slice(0, limit || 1)
-      else
-        offset = query.fetch(:offset, 0)
-        query  = query.except(:offset)
-        scoped_query(query).slice(offset, limit || 1)
-      end
+      query = self.query.slice(0, limit).update(query)
 
-      if limit
+      if limit_specified
         all(query)
       else
         query.repository.read(query).first
@@ -322,22 +336,18 @@ module DataMapper
     #
     # @api public
     def last(*args)
-      last_arg = args.last
+      first_arg = args.first
+      last_arg  = args.last
 
-      limit      = args.first if args.first.kind_of?(Integer)
-      with_query = last_arg.respond_to?(:merge) && !last_arg.blank?
+      limit_specified = first_arg.kind_of?(Integer)
+      with_query      = (last_arg.kind_of?(Hash) && !last_arg.empty?) || last_arg.kind_of?(Query)
 
-      query = with_query ? last_arg : {}
+      limit = limit_specified ? first_arg : 1
+      query = with_query      ? last_arg  : {}
 
-      query = if query.kind_of?(Query)
-        query.slice(0, limit || 1).reverse!
-      else
-        offset = query.fetch(:offset, 0)
-        query  = query.except(:offset)
-        scoped_query(query).slice(offset, limit || 1).reverse!
-      end
+      query = self.query.slice(0, limit).update(query).reverse!
 
-      if limit
+      if limit_specified
         all(query)
       else
         query.repository.read(query).last
@@ -418,9 +428,9 @@ module DataMapper
 
     # Copy a set of records from one repository to another.
     #
-    # @param [String] source
+    # @param [String] source_repository_name
     #   The name of the Repository the resources should be copied _from_
-    # @param [String] destination
+    # @param [String] target_repository_name
     #   The name of the Repository the resources should be copied _to_
     # @param [Hash] query
     #   The conditions with which to find the records to copy. These
@@ -430,16 +440,23 @@ module DataMapper
     #   A Collection of the Resource instances created in the operation
     #
     # @api public
-    def copy(source, destination, query = {})
+    def copy(source_repository_name, target_repository_name, query = {})
+      target_properties = properties(target_repository_name)
 
-      # get the list of properties that exist in the source and destination
-      destination_properties = properties(destination)
-      fields = query[:fields] ||= properties(source).select { |property| destination_properties.include?(property) }
+      query[:fields] ||= properties(source_repository_name).select do |property|
+        target_properties.include?(property)
+      end
 
-      repository(destination) do
-        all(query.merge(:repository => source)).map do |resource|
-          create(fields.map { |property| [ property.name, property.get(resource) ] }.to_hash)
+      repository(target_repository_name) do |repository|
+        resources = []
+
+        all(query.merge(:repository => source_repository_name)).each do |resource|
+          new_resource = new
+          query[:fields].each { |property| property.set(new_resource, property.get(resource)) }
+          resources << new_resource if new_resource.save
         end
+
+        all(Query.target_query(repository, self, resources))
       end
     end
 
@@ -473,9 +490,10 @@ module DataMapper
             record = record.dup
             field_map.each { |property, field| record[property] = record.delete(field) if record.key?(field) }
 
-            model = discriminator && record[discriminator] || self
+            model     = discriminator && record[discriminator] || self
+            model_key = model.key(repository_name)
 
-            resource = if (key_values = record.values_at(*model.key(repository_name))).all?
+            resource = if model_key.valid?(key_values = record.values_at(*model_key))
               identity_map = repository.identity_map(model)
               identity_map[key_values]
             end
@@ -497,9 +515,10 @@ module DataMapper
             end
 
           when Resource
-            model = record.model
+            model     = record.model
+            model_key = model.key(repository_name)
 
-            resource = if (key_values = record.key).all?
+            resource = if model_key.valid?(key_values = record.key)
               identity_map = repository.identity_map(model)
               identity_map[key_values]
             end
@@ -513,32 +532,29 @@ module DataMapper
             end
         end
 
-        resource.instance_variable_set(:@repository, repository)
-        resource.instance_variable_set(:@saved,      true)
+        resource.instance_variable_set(:@_repository, repository)
+        resource.instance_variable_set(:@_saved,      true)
 
         if identity_map
           # defer setting the IdentityMap so second level caches can
           # record the state of the resource after loaded
           identity_map[key_values] = resource
         else
-          resource.freeze
+          resource.instance_variable_set(:@_readonly, true)
         end
 
         resource
       end
     end
 
-    # TODO: document
     # @api semipublic
     attr_reader :base_model
 
-    # TODO: document
     # @api semipublic
     def default_repository_name
       Repository.default_name
     end
 
-    # TODO: document
     # @api semipublic
     def default_order(repository_name = default_repository_name)
       @default_order[repository_name] ||= key(repository_name).map { |property| Query::Direction.new(property) }.freeze
@@ -557,17 +573,14 @@ module DataMapper
     #   otherwise the requested repository.
     #
     # @api private
-    def repository(name = nil)
+    def repository(name = nil, &block)
       #
       # There has been a couple of different strategies here, but me (zond) and dkubb are at least
       # united in the concept of explicitness over implicitness. That is - the explicit wish of the
       # caller (+name+) should be given more priority than the implicit wish of the caller (Repository.context.last).
       #
-      if block_given?
-        DataMapper.repository(name || repository_name) { |*block_args| yield(*block_args) }
-      else
-        DataMapper.repository(name || repository_name)
-      end
+
+      DataMapper.repository(name || repository_name, &block)
     end
 
     # Get the current +repository_name+ for this Model.
@@ -580,7 +593,8 @@ module DataMapper
     #
     # @api private
     def repository_name
-      Repository.context.any? ? Repository.context.last.name : default_repository_name
+      context = Repository.context
+      context.any? ? context.last.name : default_repository_name
     end
 
     # Gets the current Set of repositories for which
@@ -595,13 +609,11 @@ module DataMapper
       [ repository ].to_set + @properties.keys.map { |repository_name| DataMapper.repository(repository_name) }
     end
 
-    # TODO: document
     # @api private
     def model_method_defined?(method)
       model_methods.include?(method.to_s)
     end
 
-    # TODO: document
     # @api private
     def resource_method_defined?(method)
       resource_methods.include?(method.to_s)
@@ -609,15 +621,13 @@ module DataMapper
 
     private
 
-    # TODO: document
     # @api private
     def _create(safe, attributes)
       resource = new(attributes)
-      resource.send(safe ? :save : :save!)
+      resource.__send__(safe ? :save : :save!)
       resource
     end
 
-    # TODO: document
     # @api private
     def const_missing(name)
       if name == :DM
@@ -632,7 +642,6 @@ module DataMapper
       end
     end
 
-    # TODO: document
     # @api private
     def default_storage_name
       base_model.name
@@ -667,10 +676,12 @@ module DataMapper
           self.repository
         end
 
+        query = self.query.merge(query)
+
         if self.query.repository == repository
-          self.query.merge(query)
+          query
         else
-          Query.new(repository, self, self.query.merge(query).options)
+          Query.new(repository, self, query.options)
         end
       end
     end
@@ -679,6 +690,9 @@ module DataMapper
     def assert_valid # :nodoc:
       return if @valid
       @valid = true
+
+      name            = self.name
+      repository_name = self.repository_name
 
       if properties(repository_name).empty? &&
         !relationships(repository_name).any? { |(relationship_name, relationship)| relationship.kind_of?(Associations::ManyToOne::Relationship) }
@@ -699,19 +713,16 @@ module DataMapper
       end
     end
 
-    # TODO: document
     # @api private
     def model_methods
       @model_methods ||= ancestor_instance_methods { |mod| mod.meta_class }
     end
 
-    # TODO: document
     # @api private
     def resource_methods
       @resource_methods ||= ancestor_instance_methods { |mod| mod }
     end
 
-    # TODO: document
     # @api private
     def ancestor_instance_methods
       methods = Set.new
@@ -722,6 +733,26 @@ module DataMapper
       end
 
       methods
+    end
+
+    # Raises an exception if #get receives the wrong number of arguments
+    #
+    # @param [Array] key
+    #   the key value
+    #
+    # @return [undefined]
+    #
+    # @raise [UpdateConflictError]
+    #   raise if the resource is dirty
+    #
+    # @api private
+    def assert_valid_key_size(key)
+      expected_key_size = self.key(repository_name).size
+      actual_key_size   = key.size
+
+      if actual_key_size != expected_key_size
+        raise ArgumentError, "The number of arguments for the key is invalid, expected #{expected_key_size} but was #{actual_key_size}"
+      end
     end
   end # module Model
 end # module DataMapper

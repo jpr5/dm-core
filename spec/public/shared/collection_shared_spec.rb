@@ -22,7 +22,9 @@ share_examples_for 'A public Collection' do
     pending if @skip
   end
 
-  it { @articles.should respond_to(:<<) }
+  subject { @articles }
+
+  it { should respond_to(:<<) }
 
   describe '#<<' do
     before :all do
@@ -42,13 +44,9 @@ share_examples_for 'A public Collection' do
     it 'should append one Resource to the Collection' do
       @articles.last.should equal(@resource)
     end
-
-    it 'should not relate the Resource to the Collection' do
-      @resource.collection.should_not equal(@articles)
-    end
   end
 
-  it { @articles.should respond_to(:blank?) }
+  it { should respond_to(:blank?) }
 
   describe '#blank?' do
     describe 'when the collection is empty' do
@@ -64,7 +62,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:clean?) }
+  it { should respond_to(:clean?) }
 
   describe '#clean?' do
     describe 'with all clean resources in the collection' do
@@ -84,7 +82,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:clear) }
+  it { should respond_to(:clear) }
 
   describe '#clear' do
     before :all do
@@ -104,14 +102,10 @@ share_examples_for 'A public Collection' do
     it 'should make the Collection empty' do
       @articles.should be_empty
     end
-
-    it 'should orphan the Resources' do
-      @resources.each { |resource| resource.collection.should_not equal(@articles) }
-    end
   end
 
   [ :collect!, :map! ].each do |method|
-    it { @articles.should respond_to(method) }
+    it { should respond_to(method) }
 
     describe "##{method}" do
       before :all do
@@ -131,14 +125,10 @@ share_examples_for 'A public Collection' do
       it 'should update the Collection inline' do
         @articles.each { |resource| resource.attributes.only(:title, :content).should == { :title => 'Sample Article', :content => 'New Content' } }
       end
-
-      it 'should orphan each replaced Resource in the Collection' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
-      end
     end
   end
 
-  it { @articles.should respond_to(:concat) }
+  it { should respond_to(:concat) }
 
   describe '#concat' do
     before :all do
@@ -156,14 +146,10 @@ share_examples_for 'A public Collection' do
     it 'should concatenate the two collections' do
       @return.should == [ @article, @other ]
     end
-
-    it 'should relate each Resource to the Collection' do
-      @other_articles.each { |resource| resource.collection.should equal(@articles) }
-    end
   end
 
   [ :create, :create! ].each do |method|
-    it { @articles.should respond_to(method) }
+    it { should respond_to(method) }
 
     describe "##{method}" do
       describe 'when scoped to a property' do
@@ -278,7 +264,45 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:delete) }
+  [ :difference, :- ].each do |method|
+    it { should respond_to(method) }
+
+    describe "##{method}" do
+      subject { @articles.send(method, @other_articles) }
+
+      describe 'with a Collection' do
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [ @article ] }
+
+        it { subject.query.should == @articles.query.difference(@other_articles.query) }
+
+        it { should == @articles.to_a - @other_articles.to_a }
+      end
+
+      describe 'with an Array' do
+        before { @other_articles = @other_articles.to_ary }
+
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [ @article ] }
+
+        it { should == @articles.to_a - @other_articles.to_a }
+      end
+
+      describe 'with a Set' do
+        before { @other_articles = @other_articles.to_set }
+
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [ @article ] }
+
+        it { should == @articles.to_a - @other_articles.to_a }
+      end
+    end
+  end
+
+  it { should respond_to(:delete) }
 
   describe '#delete' do
     describe 'with a Resource within the Collection' do
@@ -299,10 +323,6 @@ share_examples_for 'A public Collection' do
       it 'should remove the Resource from the Collection' do
         @articles.should_not be_include(@resource)
       end
-
-      it 'should orphan the Resource' do
-        @resource.collection.should_not equal(@articles)
-      end
     end
 
     describe 'with a Resource not within the Collection' do
@@ -316,7 +336,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:delete_at) }
+  it { should respond_to(:delete_at) }
 
   describe '#delete_at' do
     describe 'with an offset within the Collection' do
@@ -335,10 +355,6 @@ share_examples_for 'A public Collection' do
       it 'should remove the Resource from the Collection' do
         @articles.should_not be_include(@resource)
       end
-
-      it 'should orphan the Resource' do
-        @resource.collection.should_not equal(@articles)
-      end
     end
 
     describe 'with an offset not within the Collection' do
@@ -352,7 +368,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:delete_if) }
+  it { should respond_to(:delete_if) }
 
   describe '#delete_if' do
     describe 'with a block that matches a Resource in the Collection' do
@@ -372,10 +388,6 @@ share_examples_for 'A public Collection' do
 
       it 'should remove the Resources from the Collection' do
         @resources.each { |resource| @articles.should_not be_include(resource) }
-      end
-
-      it 'should orphan the Resources' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
       end
     end
 
@@ -401,7 +413,7 @@ share_examples_for 'A public Collection' do
   end
 
   [ :destroy, :destroy! ].each do |method|
-    it { @articles.should respond_to(method) }
+    it { should respond_to(method) }
 
     describe "##{method}" do
       describe 'on a normal collection' do
@@ -424,7 +436,7 @@ share_examples_for 'A public Collection' do
 
       describe 'on a limited collection' do
         before :all do
-          @other   = @articles.create.freeze
+          @other   = @articles.create
           @limited = @articles.all(:limit => 1)
 
           @return = @limited.send(method)
@@ -449,7 +461,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:dirty?) }
+  it { should respond_to(:dirty?) }
 
   describe '#dirty?' do
     describe 'with all clean resources in the collection' do
@@ -469,7 +481,52 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:insert) }
+  # TODO: move this to enumerable_shared_spec.rb
+  it { should respond_to(:each) }
+
+  describe '#each' do
+    before :all do
+      rescue_if @skip do
+        @resources = @articles.dup.entries
+        @resources.should_not be_empty
+
+        @yield       = []
+        @collections = []
+
+        @return = @articles.each do |resource|
+          @yield       << resource
+          @collections << [ resource, resource.collection.object_id ]
+        end
+      end
+    end
+
+    it 'should return a Collection' do
+      @return.should be_kind_of(DataMapper::Collection)
+    end
+
+    it 'should return self' do
+      @return.should equal(@articles)
+    end
+
+    it 'should yield to each entry' do
+      @yield.should == @articles
+    end
+
+    it 'should yield Resources' do
+      @yield.each { |resource| resource.should be_kind_of(DataMapper::Resource) }
+    end
+
+    it 'should relate the Resource collection to the Collection within the block only' do
+      pending_if 'Fix SEL for m:m', @many_to_many do
+        @collections.each do |resource, object_id|
+          resource.collection.should_not equal(@articles)  # collection outside block
+          object_id.should == @articles.object_id          # collection inside block
+        end
+      end
+    end
+  end
+
+  it { should respond_to(:insert) }
 
   describe '#insert' do
     before :all do
@@ -487,15 +544,11 @@ share_examples_for 'A public Collection' do
     end
 
     it 'should insert one or more Resources at a given offset' do
-      @articles.should == @resources + [ @article ]
-    end
-
-    it 'should relate the Resources to the Collection' do
-      @resources.each { |resource| resource.collection.should equal(@articles) }
+      @articles.should == @resources << @article
     end
   end
 
-  it { @articles.should respond_to(:inspect) }
+  it { should respond_to(:inspect) }
 
   describe '#inspect' do
     before :all do
@@ -515,7 +568,45 @@ share_examples_for 'A public Collection' do
     it { @return.should match(/\bcontent=\"Other Article\"\s/) }
   end
 
-  it { @articles.should respond_to(:new) }
+  [ :intersection, :& ].each do |method|
+    it { should respond_to(method) }
+
+    describe "##{method}" do
+      subject { @articles.send(method, @other_articles) }
+
+      describe 'with a Collection' do
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [] }
+
+        it { subject.query.should == @articles.query.intersection(@other_articles.query) }
+
+        it { should == @articles.to_a & @other_articles.to_a }
+      end
+
+      describe 'with an Array' do
+        before { @other_articles = @other_articles.to_ary }
+
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [] }
+
+        it { should == @articles.to_a & @other_articles.to_a }
+      end
+
+      describe 'with a Set' do
+        before { @other_articles = @other_articles.to_set }
+
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [] }
+
+        it { should == @articles.to_a & @other_articles.to_a }
+      end
+    end
+  end
+
+  it { should respond_to(:new) }
 
   describe '#new' do
     describe 'when scoped to a property' do
@@ -613,7 +704,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:pop) }
+  it { should respond_to(:pop) }
 
   describe '#pop' do
     before :all do
@@ -636,10 +727,6 @@ share_examples_for 'A public Collection' do
       it 'should remove the Resource from the Collection' do
         @articles.should_not be_include(@new)
       end
-
-      it 'should orphan the Resource' do
-        @return.collection.should_not equal(@articles)
-      end
     end
 
     if RUBY_VERSION >= '1.8.7'
@@ -659,15 +746,11 @@ share_examples_for 'A public Collection' do
         it 'should remove the Resource from the Collection' do
           @articles.should_not be_include(@new)
         end
-
-        it 'should orphan the Resource' do
-          @return.each { |resource| resource.collection.should_not equal(@articles) }
-        end
       end
     end
   end
 
-  it { @articles.should respond_to(:push) }
+  it { should respond_to(:push) }
 
   describe '#push' do
     before :all do
@@ -687,13 +770,9 @@ share_examples_for 'A public Collection' do
     it 'should append the Resources to the Collection' do
       @articles.should == [ @article ] + @resources
     end
-
-    it 'should relate the Resources to the Collection' do
-      @resources.each { |resource| resource.collection.should equal(@articles) }
-    end
   end
 
-  it { @articles.should respond_to(:reject!) }
+  it { should respond_to(:reject!) }
 
   describe '#reject!' do
     describe 'with a block that matches a Resource in the Collection' do
@@ -714,10 +793,6 @@ share_examples_for 'A public Collection' do
       it 'should remove the Resources from the Collection' do
         @resources.each { |resource| @articles.should_not be_include(resource) }
       end
-
-      it 'should orphan the Resources' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
-      end
     end
 
     describe 'with a block that does not match a Resource in the Collection' do
@@ -737,7 +812,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:reload) }
+  it { should respond_to(:reload) }
 
   describe '#reload' do
     describe 'with no arguments' do
@@ -797,9 +872,9 @@ share_examples_for 'A public Collection' do
         @return.should equal(@articles)
       end
 
-      { :id => true, :content => true, :title => true }.each do |attribute, expected|
-        it "should have query field #{attribute.inspect} #{'not' unless expected} loaded".squeeze(' ') do
-          @collection.each { |resource| resource.attribute_loaded?(attribute).should == expected }
+      [ :id, :content, :title ].each do |attribute|
+        it "should have query field #{attribute.inspect} loaded" do
+          @collection.each { |resource| resource.attribute_loaded?(attribute).should be_true }
         end
       end
     end
@@ -829,17 +904,15 @@ share_examples_for 'A public Collection' do
         @return.should equal(@articles)
       end
 
-      { :id => true, :content => true, :title => loaded }.each do |attribute, expected|
-        it "should have query field #{attribute.inspect} #{'not' unless expected} loaded".squeeze(' ') do
-          pending_if "TODO: #{@articles.class}#reload should not be a kicker", @one_to_many && loaded == false && attribute == :title do
-            @collection.each { |resource| resource.attribute_loaded?(attribute).should == expected }
-          end
+      [ :id, :content, :title ].each do |attribute|
+        it "should have query field #{attribute.inspect} loaded" do
+          @collection.each { |resource| resource.attribute_loaded?(attribute).should be_true }
         end
       end
     end
   end
 
-  it { @articles.should respond_to(:replace) }
+  it { should respond_to(:replace) }
 
   describe '#replace' do
     describe 'when provided an Array of Resources' do
@@ -859,14 +932,6 @@ share_examples_for 'A public Collection' do
 
       it 'should update the Collection with new Resources' do
         @articles.should == @other_articles
-      end
-
-      it 'should relate each Resource added to the Collection' do
-        @articles.each { |resource| resource.collection.should equal(@articles) }
-      end
-
-      it 'should orphan each Resource removed from the Collection' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
       end
     end
 
@@ -899,7 +964,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:reverse!) }
+  it { should respond_to(:reverse!) }
 
   describe '#reverse!' do
     before :all do
@@ -928,7 +993,7 @@ share_examples_for 'A public Collection' do
   end
 
   [ :save, :save! ].each do |method|
-    it { @articles.should respond_to(method) }
+    it { should respond_to(method) }
 
     describe "##{method}" do
       describe 'when Resources are not saved' do
@@ -958,15 +1023,11 @@ share_examples_for 'A public Collection' do
         it 'should return true' do
           @return.should be_true
         end
-
-        it 'should orphan the Resources' do
-          @resources.each { |resource| resource.collection.should_not equal(@articles) }
-        end
       end
     end
   end
 
-  it { @articles.should respond_to(:shift) }
+  it { should respond_to(:shift) }
 
   describe '#shift' do
     describe 'with no arguments' do
@@ -984,10 +1045,6 @@ share_examples_for 'A public Collection' do
 
       it 'should remove the Resource from the Collection' do
         @articles.should_not be_include(@return)
-      end
-
-      it 'should orphan the Resource' do
-        @return.collection.should_not equal(@articles)
       end
     end
 
@@ -1009,15 +1066,11 @@ share_examples_for 'A public Collection' do
         it 'should remove the Resource from the Collection' do
           @articles.should_not be_include(@article)
         end
-
-        it 'should orphan the Resource' do
-          @return.each { |resource| resource.collection.should_not equal(@articles) }
-        end
       end
     end
   end
 
-  it { @articles.should respond_to(:slice!) }
+  it { should respond_to(:slice!) }
 
   describe '#slice!' do
     before :all do
@@ -1048,10 +1101,6 @@ share_examples_for 'A public Collection' do
       it 'should remove the Resource from the Collection' do
         @articles.should_not be_include(@resource)
       end
-
-      it 'should orphan the Resource' do
-        @resource.collection.should_not equal(@articles)
-      end
     end
 
     describe 'with a positive offset and length' do
@@ -1071,10 +1120,6 @@ share_examples_for 'A public Collection' do
 
       it 'should remove the Resources from the Collection' do
         @resources.each { |resource| @articles.should_not be_include(resource) }
-      end
-
-      it 'should orphan the Resources' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
       end
 
       it 'should scope the Collection' do
@@ -1101,10 +1146,6 @@ share_examples_for 'A public Collection' do
         @resources.each { |resource| @articles.should_not be_include(resource) }
       end
 
-      it 'should orphan the Resources' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
-      end
-
       it 'should scope the Collection' do
         @resources.reload.should == @copy.entries.slice!(5..10)
       end
@@ -1128,10 +1169,6 @@ share_examples_for 'A public Collection' do
       it 'should remove the Resource from the Collection' do
         @articles.should_not be_include(@resource)
       end
-
-      it 'should orphan the Resource' do
-        @resource.collection.should_not equal(@articles)
-      end
     end
 
     describe 'with a negative offset and length' do
@@ -1151,10 +1188,6 @@ share_examples_for 'A public Collection' do
 
       it 'should remove the Resources from the Collection' do
         @resources.each { |resource| @articles.should_not be_include(resource) }
-      end
-
-      it 'should orphan the Resources' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
       end
 
       it 'should scope the Collection' do
@@ -1179,10 +1212,6 @@ share_examples_for 'A public Collection' do
 
       it 'should remove the Resources from the Collection' do
         @resources.each { |resource| @articles.should_not be_include(resource) }
-      end
-
-      it 'should orphan the Resources' do
-        @resources.each { |resource| resource.collection.should_not equal(@articles) }
       end
 
       it 'should scope the Collection' do
@@ -1227,7 +1256,7 @@ share_examples_for 'A public Collection' do
     end
   end
 
-  it { @articles.should respond_to(:sort!) }
+  it { should respond_to(:sort!) }
 
   describe '#sort!' do
     describe 'without a block' do
@@ -1268,7 +1297,7 @@ share_examples_for 'A public Collection' do
   end
 
   [ :splice, :[]= ].each do |method|
-    it { @articles.should respond_to(method) }
+    it { should respond_to(method) }
 
     describe "##{method}" do
       before :all do
@@ -1293,9 +1322,8 @@ share_examples_for 'A public Collection' do
 
       describe 'with a positive offset and a Resource' do
         before :all do
-          rescue_if 'TODO', @skip do
+          rescue_if @skip do
             @original = @copy[1]
-            @original.collection.should equal(@articles)
 
             @return = @resource = @articles.send(method, 1, @new)
           end
@@ -1318,21 +1346,12 @@ share_examples_for 'A public Collection' do
         it 'should include the Resource in the Collection' do
           @articles.should be_include(@resource)
         end
-
-        it 'should relate the Resource to the Collection' do
-          @resource.collection.should equal(@articles)
-        end
-
-        it 'should orphan the original Resource' do
-          @original.collection.should_not equal(@articles)
-        end
       end
 
       describe 'with a positive offset and length and a Resource' do
         before :all do
-          rescue_if 'TODO', @skip do
+          rescue_if @skip do
             @original = @copy[2]
-            @original.collection.should equal(@articles)
 
             @return = @resource = @articles.send(method, 2, 1, @new)
           end
@@ -1355,17 +1374,12 @@ share_examples_for 'A public Collection' do
         it 'should include the Resource in the Collection' do
           @articles.should be_include(@resource)
         end
-
-        it 'should orphan the original Resource' do
-          @original.collection.should_not equal(@articles)
-        end
       end
 
       describe 'with a positive range and a Resource' do
         before :all do
-          rescue_if 'TODO', @skip do
+          rescue_if @skip do
             @originals = @copy.values_at(2..3)
-            @originals.each { |resource| resource.collection.should equal(@articles) }
 
             @return = @resource = @articles.send(method, 2..3, @new)
           end
@@ -1388,17 +1402,12 @@ share_examples_for 'A public Collection' do
         it 'should include the Resource in the Collection' do
           @articles.should be_include(@resource)
         end
-
-        it 'should orphan the original Resources' do
-          @originals.each { |resource| resource.collection.should_not equal(@articles) }
-        end
       end
 
       describe 'with a negative offset and a Resource' do
         before :all do
-          rescue_if 'TODO', @skip do
+          rescue_if @skip do
             @original = @copy[-1]
-            @original.collection.should equal(@articles)
 
             @return = @resource = @articles.send(method, -1, @new)
           end
@@ -1421,21 +1430,12 @@ share_examples_for 'A public Collection' do
         it 'should include the Resource in the Collection' do
           @articles.should be_include(@resource)
         end
-
-        it 'should relate the Resource to the Collection' do
-          @resource.collection.should equal(@articles)
-        end
-
-        it 'should orphan the original Resource' do
-          @original.collection.should_not equal(@articles)
-        end
       end
 
       describe 'with a negative offset and length and a Resource' do
         before :all do
-          rescue_if 'TODO', @skip do
+          rescue_if @skip do
             @original = @copy[-2]
-            @original.collection.should equal(@articles)
 
             @return = @resource = @articles.send(method, -2, 1, @new)
           end
@@ -1458,17 +1458,12 @@ share_examples_for 'A public Collection' do
         it 'should include the Resource in the Collection' do
           @articles.should be_include(@resource)
         end
-
-        it 'should orphan the original Resource' do
-          @original.collection.should_not equal(@articles)
-        end
       end
 
       describe 'with a negative range and a Resource' do
         before :all do
-          rescue_if 'TODO', @skip do
+          rescue_if @skip do
             @originals = @articles.values_at(-3..-2)
-            @originals.each { |resource| resource.collection.should equal(@articles) }
 
             @return = @resource = @articles.send(method, -3..-2, @new)
           end
@@ -1491,10 +1486,6 @@ share_examples_for 'A public Collection' do
         it 'should include the Resource in the Collection' do
           @articles.should be_include(@resource)
         end
-
-        it 'should orphan the original Resources' do
-          @originals.each { |resource| resource.collection.should_not equal(@articles) }
-        end
       end
     end
   end
@@ -1502,7 +1493,7 @@ share_examples_for 'A public Collection' do
   describe '#[]=' do
     describe 'when swapping resources' do
       before :all do
-        rescue_if 'TODO', @skip do
+        rescue_if @skip do
           @articles.create(:content => 'Another Article')
 
           @entries = @articles.entries
@@ -1514,14 +1505,48 @@ share_examples_for 'A public Collection' do
       it 'should include the Resource in the Collection' do
         @articles.should == @entries.reverse
       end
+    end
+  end
 
-      it 'should relate the Resource to the Collection' do
-        @articles.each { |resource| resource.collection.should equal(@articles) }
+  [ :union, :|, :+ ].each do |method|
+    it { should respond_to(method) }
+
+    describe "##{method}" do
+      subject { @articles.send(method, @other_articles) }
+
+      describe 'with a Collection' do
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [ @article, @other ] }
+
+        it { subject.query.should == @articles.query.union(@other_articles.query) }
+
+        it { should == @articles.to_a | @other_articles.to_a }
+      end
+
+      describe 'with an Array' do
+        before { @other_articles = @other_articles.to_ary }
+
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [ @article, @other ] }
+
+        it { should == @articles.to_a | @other_articles.to_a }
+      end
+
+      describe 'with a Set' do
+        before { @other_articles = @other_articles.to_set }
+
+        it { should be_kind_of(DataMapper::Collection) }
+
+        it { should == [ @article, @other ] }
+
+        it { should == @articles.to_a | @other_articles.to_a }
       end
     end
   end
 
-  it { @articles.should respond_to(:unshift) }
+  it { should respond_to(:unshift) }
 
   describe '#unshift' do
     before :all do
@@ -1541,14 +1566,10 @@ share_examples_for 'A public Collection' do
     it 'should prepend the Resources to the Collection' do
       @articles.should == @resources + [ @article ]
     end
-
-    it 'should relate the Resources to the Collection' do
-      @resources.each { |resource| resource.collection.should equal(@articles) }
-    end
   end
 
   [ :update, :update! ].each do |method|
-    it { @articles.should respond_to(method) }
+    it { should respond_to(method) }
 
     describe "##{method}" do
       describe 'with no arguments' do
@@ -1573,15 +1594,7 @@ share_examples_for 'A public Collection' do
         end
 
         if method == :update!
-          # FIXME: this is spec order dependent, move this into a helper method
-          # and execute in the before :all block
-          unless loaded
-            it 'should not be a kicker' do
-              pending_if 'TODO', @many_to_many do
-                @articles.should_not be_loaded
-              end
-            end
-          end
+          should_not_be_a_kicker
         end
 
         it 'should return true' do
@@ -1589,12 +1602,12 @@ share_examples_for 'A public Collection' do
         end
 
         it 'should update attributes of all Resources' do
-          @articles.each { |resource| @attributes.each { |key, value| resource.send(key).should == value } }
+          @articles.each { |resource| @attributes.each { |key, value| resource.__send__(key).should == value } }
         end
 
         it 'should persist the changes' do
           resource = @article_model.get(*@article.key)
-          @attributes.each { |key, value| resource.send(key).should == value }
+          @attributes.each { |key, value| resource.__send__(key).should == value }
         end
       end
 
@@ -1606,15 +1619,7 @@ share_examples_for 'A public Collection' do
         end
 
         if method == :update!
-          # FIXME: this is spec order dependent, move this into a helper method
-          # and execute in the before :all block
-          unless loaded
-            it 'should not be a kicker' do
-              pending_if 'TODO', @many_to_many do
-                @articles.should_not be_loaded
-              end
-            end
-          end
+          should_not_be_a_kicker
         end
 
         it 'should return true' do
@@ -1622,16 +1627,16 @@ share_examples_for 'A public Collection' do
         end
 
         it 'should update attributes of all Resources' do
-          @articles.each { |resource| @attributes.each { |key, value| resource.send(key).should == value } }
+          @articles.each { |resource| @attributes.each { |key, value| resource.__send__(key).should == value } }
         end
 
         it 'should persist the changes' do
           resource = @article_model.get(*@article.key)
-          @attributes.each { |key, value| resource.send(key).should == value }
+          @attributes.each { |key, value| resource.__send__(key).should == value }
         end
       end
 
-      describe 'with attributes where a not-nullable property is nil' do
+      describe 'with attributes where a required property is nil' do
         before :all do
           @return = @articles.send(method, :title => nil)
         end
@@ -1655,15 +1660,7 @@ share_examples_for 'A public Collection' do
         end
 
         if method == :update!
-          # FIXME: this is spec order dependent, move this into a helper method
-          # and execute in the before :all block
-          unless loaded
-            it 'should not be a kicker' do
-              pending "Update Collection##{method} to use a subquery" do
-                @limited.should_not be_loaded
-              end
-            end
-          end
+          should_not_be_a_kicker(:@limited)
         end
 
         it 'should return true' do
@@ -1675,17 +1672,17 @@ share_examples_for 'A public Collection' do
         end
 
         it 'should update attributes of all Resources' do
-          @limited.each { |resource| @attributes.each { |key, value| resource.send(key).should == value } }
+          @limited.each { |resource| @attributes.each { |key, value| resource.__send__(key).should == value } }
         end
 
         it 'should persist the changes' do
           resource = @article_model.get(*@article.key)
-          @attributes.each { |key, value| resource.send(key).should == value }
+          @attributes.each { |key, value| resource.__send__(key).should == value }
         end
 
         it 'should not update the other Resource' do
           @other.reload
-          @attributes.each { |key, value| @other.send(key).should_not == value }
+          @attributes.each { |key, value| @other.__send__(key).should_not == value }
         end
       end
 
@@ -1697,7 +1694,7 @@ share_examples_for 'A public Collection' do
         it 'should raise an exception' do
           lambda {
             @articles.send(method, :content => 'New Content')
-          }.should raise_error(DataMapper::UpdateConflictError, "##{method} cannot be called on a dirty collection")
+          }.should raise_error(DataMapper::UpdateConflictError, "#{@articles.class}##{method} cannot be called on a dirty collection")
         end
       end
     end

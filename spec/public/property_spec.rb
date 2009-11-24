@@ -20,7 +20,7 @@ describe DataMapper::Property do
       include DataMapper::Resource
 
       property :md5hash,      String, :key => true, :length => 32
-      property :title,        String, :nullable => false, :unique => true
+      property :title,        String, :required => true, :unique => true
       property :description,  Text,   :length => 1..1024, :lazy => [ :detail ]
       property :format,       String, :default => 'jpeg'
       property :taken_at,     Time,   :default => proc { Time.now }
@@ -255,13 +255,13 @@ describe DataMapper::Property do
       end
     end
 
-    describe '#nullable?' do
+    describe '#allow_nil?' do
       it 'returns true when property can accept nil as its value' do
-        Track.properties[:artist].nullable?.should be_true
+        Track.properties[:artist].allow_nil?.should be_true
       end
 
       it 'returns false when property nil value is prohibited for this property' do
-        Image.properties[:title].nullable?.should be_false
+        Image.properties[:title].allow_nil?.should be_false
       end
     end
 
@@ -282,16 +282,18 @@ describe DataMapper::Property do
     # (since original value is set, property is no longer dirty)
     describe '#set_original_value' do
       before :all do
-        @image = Image.create(:md5hash     => '5268f0f3f452844c79843e820f998869',
-                              :title       => 'Rome at the sunset',
-                              :description => 'Just wow')
-        @image.reload
+        @image = Image.create(
+          :md5hash     => '5268f0f3f452844c79843e820f998869',
+          :title       => 'Rome at the sunset',
+          :description => 'Just wow'
+        )
+
         @property = Image.properties[:title]
       end
 
       describe 'when value changes' do
         before :all do
-          @property.set_original_value(@image, 'Rome at the sunset')
+          @property.set_original_value(@image, 'New title')
         end
 
         it 'sets original value of the property' do
@@ -306,7 +308,7 @@ describe DataMapper::Property do
 
         it 'only sets original value when it has changed' do
           @property.set_original_value(@image, 'Rome at the sunset')
-          @image.original_attributes[@property].should be_blank
+          @image.original_attributes.should_not have_key(@property)
         end
       end
     end
@@ -315,10 +317,12 @@ describe DataMapper::Property do
       before :all do
         # keep in mind we must run these examples with a
         # saved model instance
-        @image = Image.create(:md5hash     => '5268f0f3f452844c79843e820f998869',
-                              :title       => 'Rome at the sunset',
-                              :description => 'Just wow')
-        @image.reload
+        @image = Image.create(
+          :md5hash     => '5268f0f3f452844c79843e820f998869',
+          :title       => 'Rome at the sunset',
+          :description => 'Just wow'
+        )
+
         @property = Image.properties[:title]
       end
 

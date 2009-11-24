@@ -22,7 +22,6 @@ module DataMapper
         auto_migrate_up!(repository_name)
       end
 
-      # TODO: document
       # @api public
       def auto_upgrade!(repository_name = nil)
         repository_execute(:auto_upgrade!, repository_name)
@@ -30,19 +29,16 @@ module DataMapper
 
       private
 
-      # TODO: document
       # @api private
       def auto_migrate_down!(repository_name)
         repository_execute(:auto_migrate_down!, repository_name)
       end
 
-      # TODO: document
       # @api private
       def auto_migrate_up!(repository_name)
         repository_execute(:auto_migrate_up!, repository_name)
       end
 
-      # TODO: document
       # @api private
       def repository_execute(method, repository_name)
         DataMapper::Model.descendants.each do |model|
@@ -52,7 +48,6 @@ module DataMapper
     end
 
     module DataObjectsAdapter
-      # TODO: document
       # @api private
       def self.included(base)
         base.extend ClassMethods
@@ -82,7 +77,7 @@ module DataMapper
           AND "table_name" = ?
         SQL
 
-        query(statement, schema_name, storage_name).first > 0
+        select(statement, schema_name, storage_name).first > 0
       end
 
       # Returns whether the field exists.
@@ -105,12 +100,12 @@ module DataMapper
           AND "column_name" = ?
         SQL
 
-        query(statement, schema_name, storage_name, column_name).first > 0
+        select(statement, schema_name, storage_name, column_name).first > 0
       end
 
-      # TODO: document
       # @api semipublic
       def upgrade_model_storage(model)
+        name       = self.name
         properties = model.properties_with_subclasses(name)
 
         if success = create_model_storage(model)
@@ -133,20 +128,20 @@ module DataMapper
         end
       end
 
-      # TODO: document
       # @api semipublic
       def create_model_storage(model)
+        name       = self.name
         properties = model.properties_with_subclasses(name)
 
         return false if storage_exists?(model.storage_name(name))
         return false if properties.empty?
 
         with_connection do |connection|
-          statement = create_table_statement(connection, model, properties)
-          command   = connection.create_command(statement)
-          command.execute_non_query
+          statements = [ create_table_statement(connection, model, properties) ]
+          statements.concat(create_index_statements(model))
+          statements.concat(create_unique_index_statements(model))
 
-          (create_index_statements(model) + create_unique_index_statements(model)).each do |statement|
+          statements.each do |statement|
             command   = connection.create_command(statement)
             command.execute_non_query
           end
@@ -155,7 +150,6 @@ module DataMapper
         true
       end
 
-      # TODO: document
       # @api semipublic
       def destroy_model_storage(model)
         return true unless supports_drop_table_if_exists? || storage_exists?(model.storage_name(name))
@@ -174,25 +168,21 @@ module DataMapper
           false
         end
 
-        # TODO: document
         # @api private
         def supports_drop_table_if_exists?
           false
         end
 
-        # TODO: document
         # @api private
         def schema_name
           raise NotImplementedError, "#{self.class}#schema_name not implemented"
         end
 
-        # TODO: document
         # @api private
         def alter_table_add_column_statement(connection, table_name, schema_hash)
           "ALTER TABLE #{quote_name(table_name)} ADD COLUMN #{property_schema_statement(connection, schema_hash)}"
         end
 
-        # TODO: document
         # @api private
         def create_table_statement(connection, model, properties)
           statement = <<-SQL.compress_lines
@@ -204,19 +194,19 @@ module DataMapper
           statement
         end
 
-        # TODO: document
         # @api private
         def drop_table_statement(model)
+          table_name = quote_name(model.storage_name(name))
           if supports_drop_table_if_exists?
-            "DROP TABLE IF EXISTS #{quote_name(model.storage_name(name))}"
+            "DROP TABLE IF EXISTS #{table_name}"
           else
-            "DROP TABLE #{quote_name(model.storage_name(name))}"
+            "DROP TABLE #{table_name}"
           end
         end
 
-        # TODO: document
         # @api private
         def create_index_statements(model)
+          name       = self.name
           table_name = model.storage_name(name)
           model.properties(name).indexes.map do |index_name, fields|
             <<-SQL.compress_lines
@@ -226,9 +216,9 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api private
         def create_unique_index_statements(model)
+          name       = self.name
           table_name = model.storage_name(name)
           model.properties(name).unique_indexes.map do |index_name, fields|
             <<-SQL.compress_lines
@@ -238,61 +228,59 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api private
         def property_schema_hash(property)
-          # Attempt to address DM Ticket #999, which is ultimately
-          # about dm-more/add-on types not having access to the TEXT
-          # schema primitive (because the Text class primitive is
-          # gone).
-          #
-          # Below makes it possible for types to *inherit* from
-          # existing DM::Types, whose underlying ancestral schema
-          # primitives we can then use instead.
-          #
-          # e.g. class Yaml < ::DataMapper::Types::Text
-          tm     = self.class.type_map
-          schema = (tm.select { |k, v| property.type.ancestors.include?(k) }.flatten.last ||
-                    tm[property.primitive]).merge(:name => property.field)
+          primitive = property.primitive
+          type      = property.type
+          type_map  = self.class.type_map
 
-          if property.primitive == String && schema[:primitive] != 'TEXT' && schema[:primitive] != 'CLOB'
+          schema = (type_map[type] || type_map[primitive]).merge(:name => property.field)
+
+          schema_primitive = schema[:primitive]
+
+          if primitive == String && schema_primitive != 'TEXT' && schema_primitive != 'CLOB' && schema_primitive != 'NVARCHAR'
             schema[:length] = property.length
-          elsif property.primitive == BigDecimal || property.primitive == Float
+          elsif primitive == BigDecimal || primitive == Float
             schema[:precision] = property.precision
             schema[:scale]     = property.scale
           end
 
-          schema[:nullable] = property.nullable?
-          schema[:serial]   = property.serial?
+          schema[:allow_nil] = property.allow_nil?
+          schema[:serial]    = property.serial?
 
-          if property.default.nil? || property.default.respond_to?(:call)
-            # remove the default if the property is not nullable
-            schema.delete(:default) unless property.nullable?
+          default = property.default
+
+          if default.nil? || default.respond_to?(:call)
+            # remove the default if the property does not allow nil
+            schema.delete(:default) unless schema[:allow_nil]
           else
-            if property.type.respond_to?(:dump)
-              schema[:default] = property.type.dump(property.default, property)
+            schema[:default] = if type.respond_to?(:dump)
+              type.dump(default, property)
             else
-              schema[:default] = property.default
+              default
             end
           end
 
           schema
         end
 
-        # TODO: document
         # @api private
         def property_schema_statement(connection, schema)
           statement = quote_name(schema[:name])
           statement << " #{schema[:primitive]}"
 
+          length = schema[:length]
+
           if schema[:precision] && schema[:scale]
             statement << "(#{[ :precision, :scale ].map { |key| connection.quote_value(schema[key]) }.join(', ')})"
-          elsif schema[:length]
-            statement << "(#{connection.quote_value(schema[:length])})"
+          elsif length == 'max'
+            statement << '(max)'
+          elsif length
+            statement << "(#{connection.quote_value(length)})"
           end
 
           statement << " DEFAULT #{connection.quote_value(schema[:default])}" if schema.key?(:default)
-          statement << ' NOT NULL' unless schema[:nullable]
+          statement << ' NOT NULL' unless schema[:allow_nil]
           statement
         end
       end # module SQL
@@ -311,17 +299,16 @@ module DataMapper
           scale     = Property::DEFAULT_SCALE_BIGDECIMAL
 
           @type_map ||= {
-            Integer       => { :primitive => 'INTEGER'                                           },
-            String        => { :primitive => 'VARCHAR', :length => length                        },
-            Class         => { :primitive => 'VARCHAR', :length => length                        },
-            BigDecimal    => { :primitive => 'DECIMAL', :precision => precision, :scale => scale },
-            Float         => { :primitive => 'FLOAT',   :precision => precision                  },
-            DateTime      => { :primitive => 'TIMESTAMP'                                         },
-            Date          => { :primitive => 'DATE'                                              },
-            Time          => { :primitive => 'TIMESTAMP'                                         },
-            TrueClass     => { :primitive => 'BOOLEAN'                                           },
-            Types::Object => { :primitive => 'TEXT'                                              },
-            Types::Text   => { :primitive => 'TEXT'                                              },
+            Integer     => { :primitive => 'INTEGER'                                           },
+            String      => { :primitive => 'VARCHAR', :length => length                        },
+            Class       => { :primitive => 'VARCHAR', :length => length                        },
+            BigDecimal  => { :primitive => 'DECIMAL', :precision => precision, :scale => scale },
+            Float       => { :primitive => 'FLOAT',   :precision => precision                  },
+            DateTime    => { :primitive => 'TIMESTAMP'                                         },
+            Date        => { :primitive => 'DATE'                                              },
+            Time        => { :primitive => 'TIMESTAMP'                                         },
+            TrueClass   => { :primitive => 'BOOLEAN'                                           },
+            Types::Text => { :primitive => 'TEXT'                                              },
           }.freeze
         end
       end # module ClassMethods
@@ -332,41 +319,35 @@ module DataMapper
       DEFAULT_CHARACTER_SET = 'utf8'.freeze
       DEFAULT_COLLATION     = 'utf8_unicode_ci'.freeze
 
-      # TODO: document
       # @api private
       def self.included(base)
         base.extend ClassMethods
       end
 
-      # TODO: document
       # @api semipublic
       def storage_exists?(storage_name)
-        query('SHOW TABLES LIKE ?', storage_name).first == storage_name
+        select('SHOW TABLES LIKE ?', storage_name).first == storage_name
       end
 
-      # TODO: document
       # @api semipublic
       def field_exists?(storage_name, field)
-        result = query("SHOW COLUMNS FROM #{quote_name(storage_name)} LIKE ?", field).first
+        result = select("SHOW COLUMNS FROM #{quote_name(storage_name)} LIKE ?", field).first
         result ? result.field == field : false
       end
 
       module SQL #:nodoc:
 #        private  ## This cannot be private for current migrations
 
-        # TODO: document
         # @api private
         def supports_serial?
           true
         end
 
-        # TODO: document
         # @api private
         def supports_drop_table_if_exists?
           true
         end
 
-        # TODO: document
         # @api private
         def schema_name
           # TODO: is there a cleaner way to find out the current DB we are connected to?
@@ -376,13 +357,11 @@ module DataMapper
         # TODO: update dkubb/dm-more/dm-migrations to use schema_name and remove this
         alias db_name schema_name
 
-        # TODO: document
         # @api private
         def create_table_statement(connection, model, properties)
           "#{super} ENGINE = #{DEFAULT_ENGINE} CHARACTER SET #{character_set} COLLATE #{collation}"
         end
 
-        # TODO: document
         # @api private
         def property_schema_hash(property)
           schema = super
@@ -392,14 +371,16 @@ module DataMapper
             schema.delete(:default)
           end
 
-          if property.primitive == Integer && property.min && property.max
-            schema[:primitive] = integer_column_statement(property.min..property.max)
+          min = property.min
+          max = property.max
+
+          if property.primitive == Integer && min && max
+            schema[:primitive] = integer_column_statement(min..max)
           end
 
           schema
         end
 
-        # TODO: document
         # @api private
         def property_schema_statement(connection, schema)
           statement = super
@@ -411,22 +392,19 @@ module DataMapper
           statement
         end
 
-        # TODO: document
         # @api private
         def character_set
           @character_set ||= show_variable('character_set_connection') || DEFAULT_CHARACTER_SET
         end
 
-        # TODO: document
         # @api private
         def collation
           @collation ||= show_variable('collation_connection') || DEFAULT_COLLATION
         end
 
-        # TODO: document
         # @api private
         def show_variable(name)
-          result = query('SHOW VARIABLES LIKE ?', name).first
+          result = select('SHOW VARIABLES LIKE ?', name).first
           result ? result.value.freeze : nil
         end
 
@@ -505,11 +483,17 @@ module DataMapper
           min = range.first
           max = range.last
 
-          if    min >= -2**7  && max < 2**7  then 'TINYINT'
-          elsif min >= -2**15 && max < 2**15 then 'SMALLINT'
-          elsif min >= -2**23 && max < 2**23 then 'MEDIUMINT'
-          elsif min >= -2**31 && max < 2**31 then 'INT'
-          elsif min >= -2**63 && max < 2**63 then 'BIGINT'
+          tinyint   = 2**7
+          smallint  = 2**15
+          integer   = 2**31
+          mediumint = 2**23
+          bigint    = 2**63
+
+          if    min >= -tinyint   && max < tinyint   then 'TINYINT'
+          elsif min >= -smallint  && max < smallint  then 'SMALLINT'
+          elsif min >= -mediumint && max < mediumint then 'MEDIUMINT'
+          elsif min >= -integer   && max < integer   then 'INT'
+          elsif min >= -bigint    && max < bigint    then 'BIGINT'
           else
             raise ArgumentError, "min #{min} and max #{max} exceeds supported range"
           end
@@ -586,25 +570,21 @@ module DataMapper
     end # module MysqlAdapter
 
     module PostgresAdapter
-      # TODO: document
       # @api private
       def self.included(base)
         base.extend ClassMethods
       end
 
-      # TODO: document
       # @api semipublic
       def upgrade_model_storage(model)
         without_notices { super }
       end
 
-      # TODO: document
       # @api semipublic
       def create_model_storage(model)
         without_notices { super }
       end
 
-      # TODO: document
       # @api semipublic
       def destroy_model_storage(model)
         if supports_drop_table_if_exists?
@@ -617,25 +597,21 @@ module DataMapper
       module SQL #:nodoc:
 #        private  ## This cannot be private for current migrations
 
-        # TODO: document
         # @api private
         def supports_drop_table_if_exists?
           @supports_drop_table_if_exists ||= postgres_version >= '8.2'
         end
 
-        # TODO: document
         # @api private
         def schema_name
-          @schema_name ||= query('SELECT current_schema()').first.freeze
+          @schema_name ||= select('SELECT current_schema()').first.freeze
         end
 
-        # TODO: document
         # @api private
         def postgres_version
-          @postgres_version ||= query('SELECT version()').first.split[1].freeze
+          @postgres_version ||= select('SELECT version()').first.split[1].freeze
         end
 
-        # TODO: document
         # @api private
         def without_notices
           # execute the block with NOTICE messages disabled
@@ -647,23 +623,27 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api private
         def property_schema_hash(property)
           schema = super
 
+          primitive = property.primitive
+
           # Postgres does not support precision and scale for Float
-          if property.primitive == Float
+          if primitive == Float
             schema.delete(:precision)
             schema.delete(:scale)
           end
 
-          if property.primitive == Integer && property.min && property.max
-            schema[:primitive] = integer_column_statement(property.min..property.max)
+          min = property.min
+          max = property.max
+
+          if primitive == Integer && min && max
+            schema[:primitive] = integer_column_statement(min..max)
           end
 
           if schema[:serial]
-            schema[:primitive] = serial_column_statement(property.min..property.max)
+            schema[:primitive] = serial_column_statement(min..max)
           end
 
           schema
@@ -684,9 +664,13 @@ module DataMapper
           min = range.first
           max = range.last
 
-          if    min >= -2**15 && max < 2**15 then 'SMALLINT'
-          elsif min >= -2**31 && max < 2**31 then 'INTEGER'
-          elsif min >= -2**63 && max < 2**63 then 'BIGINT'
+          smallint = 2**15
+          integer  = 2**31
+          bigint   = 2**63
+
+          if    min >= -smallint && max < smallint then 'SMALLINT'
+          elsif min >= -integer  && max < integer  then 'INTEGER'
+          elsif min >= -bigint   && max < bigint   then 'BIGINT'
           else
             raise ArgumentError, "min #{min} and max #{max} exceeds supported range"
           end
@@ -725,30 +709,27 @@ module DataMapper
           scale     = Property::DEFAULT_SCALE_BIGDECIMAL
 
           @type_map ||= super.merge(
-            BigDecimal => { :primitive => 'NUMERIC', :precision => precision, :scale => scale },
-            Float      => { :primitive => 'DOUBLE PRECISION'                                  }
+            BigDecimal => { :primitive => 'NUMERIC',          :precision => precision, :scale => scale },
+            Float      => { :primitive => 'DOUBLE PRECISION'                                           }
           ).freeze
         end
       end # module ClassMethods
     end # module PostgresAdapter
 
     module Sqlite3Adapter
-      # TODO: document
       # @api private
       def self.included(base)
         base.extend ClassMethods
       end
 
-      # TODO: document
       # @api semipublic
       def storage_exists?(storage_name)
-        query_table(storage_name).size > 0
+        table_info(storage_name).any?
       end
 
-      # TODO: document
       # @api semipublic
       def field_exists?(storage_name, column_name)
-        query_table(storage_name).any? do |row|
+        table_info(storage_name).any? do |row|
           row.name == column_name
         end
       end
@@ -756,25 +737,21 @@ module DataMapper
       module SQL #:nodoc:
 #        private  ## This cannot be private for current migrations
 
-        # TODO: document
         # @api private
         def supports_serial?
           @supports_serial ||= sqlite_version >= '3.1.0'
         end
 
-        # TODO: document
         # @api private
         def supports_drop_table_if_exists?
           @supports_drop_table_if_exists ||= sqlite_version >= '3.3.0'
         end
 
-        # TODO: document
         # @api private
-        def query_table(table_name)
-          query("PRAGMA table_info(#{quote_name(table_name)})")
+        def table_info(table_name)
+          select("PRAGMA table_info(#{quote_name(table_name)})")
         end
 
-        # TODO: document
         # @api private
         def create_table_statement(connection, model, properties)
           statement = <<-SQL.compress_lines
@@ -793,7 +770,6 @@ module DataMapper
           statement
         end
 
-        # TODO: document
         # @api private
         def property_schema_statement(connection, schema)
           statement = super
@@ -805,10 +781,9 @@ module DataMapper
           statement
         end
 
-        # TODO: document
         # @api private
         def sqlite_version
-          @sqlite_version ||= query('SELECT sqlite_version(*)').first.freeze
+          @sqlite_version ||= select('SELECT sqlite_version(*)').first.freeze
         end
       end # module SQL
 
@@ -827,13 +802,11 @@ module DataMapper
     end # module Sqlite3Adapter
 
     module OracleAdapter
-      # TODO: document
       # @api private
       def self.included(base)
         base.extend ClassMethods
       end
 
-      # TODO: document
       # @api semipublic
       def storage_exists?(storage_name)
         statement = <<-SQL.compress_lines
@@ -843,10 +816,9 @@ module DataMapper
           AND table_name = ?
         SQL
 
-        query(statement, schema_name, oracle_upcase(storage_name)).first > 0
+        select(statement, schema_name, oracle_upcase(storage_name)).first > 0
       end
 
-      # TODO: document
       # @api semipublic
       def sequence_exists?(sequence_name)
         return false unless sequence_name
@@ -857,10 +829,9 @@ module DataMapper
           AND sequence_name = ?
         SQL
 
-        query(statement, schema_name, oracle_upcase(sequence_name)).first > 0
+        select(statement, schema_name, oracle_upcase(sequence_name)).first > 0
       end
 
-      # TODO: document
       # @api semipublic
       def field_exists?(storage_name, field_name)
         statement = <<-SQL.compress_lines
@@ -871,10 +842,9 @@ module DataMapper
           AND column_name = ?
         SQL
 
-        query(statement, schema_name, oracle_upcase(storage_name), oracle_upcase(field_name)).first > 0
+        select(statement, schema_name, oracle_upcase(storage_name), oracle_upcase(field_name)).first > 0
       end
 
-      # TODO: document
       # @api semipublic
       def storage_fields(storage_name)
         statement = <<-SQL.compress_lines
@@ -884,12 +854,12 @@ module DataMapper
           AND table_name = ?
         SQL
 
-        query(statement, schema_name, oracle_upcase(storage_name))
+        select(statement, schema_name, oracle_upcase(storage_name))
       end
 
-      # TODO: document
       # @api semipublic
       def create_model_storage(model)
+        name       = self.name
         properties = model.properties_with_subclasses(name)
         table_name = model.storage_name(name)
         truncate_or_delete = self.class.auto_migrate_with
@@ -909,17 +879,12 @@ module DataMapper
               destroy_model_storage(model, true)
             end
 
-            statement = create_table_statement(connection, model, properties)
-            command   = connection.create_command(statement)
-            command.execute_non_query
+            statements = [ create_table_statement(connection, model, properties) ]
+            statements.concat(create_index_statements(model))
+            statements.concat(create_unique_index_statements(model))
+            statements.concat(create_sequence_statements(model))
 
-            (create_index_statements(model) + create_unique_index_statements(model)).each do |statement|
-              command   = connection.create_command(statement)
-              command.execute_non_query
-            end
-
-            # added creation of sequence
-            create_sequence_statements(model).each do |statement|
+            statements.each do |statement|
               command   = connection.create_command(statement)
               command.execute_non_query
             end
@@ -930,22 +895,21 @@ module DataMapper
         true
       end
 
-      # TODO: document
       # @api semipublic
       def destroy_model_storage(model, forced = false)
         table_name = model.storage_name(name)
-        truncate_or_delete = self.class.auto_migrate_with
+        klass      = self.class
+        truncate_or_delete = klass.auto_migrate_with
         if storage_exists?(table_name)
           if truncate_or_delete && !forced
-            statement = case truncate_or_delete
+            case truncate_or_delete
             when :truncate
-              truncate_table_statement(model)
+              execute(truncate_table_statement(model))
             when :delete
-              delete_table_statement(model)
+              execute(delete_table_statement(model))
             else
               raise ArgumentError, "Unsupported auto_migrate_with option"
             end
-            execute(statement)
             @truncated_tables ||= {}
             @truncated_tables[table_name] = true
           else
@@ -954,14 +918,14 @@ module DataMapper
           end
         end
         # added destroy of sequences
-        reset_sequences = self.class.auto_migrate_reset_sequences
+        reset_sequences = klass.auto_migrate_reset_sequences
         table_is_truncated = @truncated_tables && @truncated_tables[table_name]
         unless truncate_or_delete && !reset_sequences && !forced
           if sequence_exists?(model_sequence_name(model))
-            if table_is_truncated && !forced
-              statement = reset_sequence_statement(model)
+            statement = if table_is_truncated && !forced
+              reset_sequence_statement(model)
             else
-              statement = drop_sequence_statement(model)
+              drop_sequence_statement(model)
             end
             execute(statement) if statement
           end
@@ -972,7 +936,7 @@ module DataMapper
       private
 
       def storage_has_all_fields?(table_name, properties)
-        properties.map{|p| oracle_upcase(p.field)}.sort == storage_fields(table_name).sort
+        properties.map { |property| oracle_upcase(property.field) }.sort == storage_fields(table_name).sort
       end
 
       # If table or column name contains just lowercase characters then do uppercase
@@ -984,22 +948,24 @@ module DataMapper
       module SQL #:nodoc:
 #        private  ## This cannot be private for current migrations
 
-        # TODO: document
         # @api private
         def schema_name
-          @schema_name ||= query("SELECT SYS_CONTEXT('userenv','current_schema') FROM dual").first.freeze
+          @schema_name ||= select("SELECT SYS_CONTEXT('userenv','current_schema') FROM dual").first.freeze
         end
 
-        # TODO: document
         # @api private
         def create_sequence_statements(model)
+          name       = self.name
           table_name = model.storage_name(name)
-          serial = model.serial(name)
+          serial     = model.serial(name)
 
           statements = []
           if sequence_name = model_sequence_name(model)
+            sequence_name = quote_name(sequence_name)
+            column_name   = quote_name(serial.field)
+
             statements << <<-SQL.compress_lines
-              CREATE SEQUENCE #{quote_name(sequence_name)} NOCACHE
+              CREATE SEQUENCE #{sequence_name} NOCACHE
             SQL
 
             # create trigger only if custom sequence name was not specified
@@ -1009,8 +975,8 @@ module DataMapper
                 BEFORE INSERT ON #{quote_name(table_name)} FOR EACH ROW
                 BEGIN
                   IF inserting THEN
-                    IF :new.#{quote_name(serial.field)} IS NULL THEN
-                      SELECT #{quote_name(sequence_name)}.NEXTVAL INTO :new.#{quote_name(serial.field)} FROM dual;
+                    IF :new.#{column_name} IS NULL THEN
+                      SELECT #{sequence_name}.NEXTVAL INTO :new.#{column_name} FROM dual;
                     END IF;
                   END IF;
                 END;
@@ -1021,7 +987,6 @@ module DataMapper
           statements
         end
 
-        # TODO: document
         # @api private
         def drop_sequence_statement(model)
           if sequence_name = model_sequence_name(model)
@@ -1031,32 +996,31 @@ module DataMapper
           end
         end
 
-        # TODO: document
         # @api private
         def reset_sequence_statement(model)
           if sequence_name = model_sequence_name(model)
+            sequence_name = quote_name(sequence_name)
             <<-SQL.compress_lines
             DECLARE
               cval   INTEGER;
             BEGIN
-              SELECT #{quote_name(sequence_name)}.NEXTVAL INTO cval FROM dual;
-              EXECUTE IMMEDIATE 'ALTER SEQUENCE #{quote_name(sequence_name)} INCREMENT BY -' || cval || ' MINVALUE 0';
-              SELECT #{quote_name(sequence_name)}.NEXTVAL INTO cval FROM dual;
-              EXECUTE IMMEDIATE 'ALTER SEQUENCE #{quote_name(sequence_name)} INCREMENT BY 1';
+              SELECT #{sequence_name}.NEXTVAL INTO cval FROM dual;
+              EXECUTE IMMEDIATE 'ALTER SEQUENCE #{sequence_name} INCREMENT BY -' || cval || ' MINVALUE 0';
+              SELECT #{sequence_name}.NEXTVAL INTO cval FROM dual;
+              EXECUTE IMMEDIATE 'ALTER SEQUENCE #{sequence_name} INCREMENT BY 1';
             END;
             SQL
           else
             nil
           end
+
         end
 
-        # TODO: document
         # @api private
         def truncate_table_statement(model)
           "TRUNCATE TABLE #{quote_name(model.storage_name(name))}"
         end
 
-        # TODO: document
         # @api private
         def delete_table_statement(model)
           "DELETE FROM #{quote_name(model.storage_name(name))}"
@@ -1065,8 +1029,9 @@ module DataMapper
         private
 
         def model_sequence_name(model)
+          name       = self.name
           table_name = model.storage_name(name)
-          serial = model.serial(name)
+          serial     = model.serial(name)
 
           if serial
             serial.options[:sequence] || default_sequence_name(table_name)
@@ -1101,17 +1066,16 @@ module DataMapper
           scale     = Property::DEFAULT_SCALE_BIGDECIMAL
 
           @type_map ||= {
-            Integer       => { :primitive => 'NUMBER',   :precision => precision, :scale => 0   },
-            String        => { :primitive => 'VARCHAR2', :length => length                      },
-            Class         => { :primitive => 'VARCHAR2', :length => length                      },
-            BigDecimal    => { :primitive => 'NUMBER',   :precision => precision, :scale => nil },
-            Float         => { :primitive => 'BINARY_FLOAT',                                    },
-            DateTime      => { :primitive => 'DATE'                                             },
-            Date          => { :primitive => 'DATE'                                             },
-            Time          => { :primitive => 'DATE'                                             },
-            TrueClass     => { :primitive => 'NUMBER',  :precision => 1, :scale => 0            },
-            Types::Object => { :primitive => 'CLOB'                                             },
-            Types::Text   => { :primitive => 'CLOB'                                             },
+            Integer     => { :primitive => 'NUMBER',   :precision => precision, :scale => 0   },
+            String      => { :primitive => 'VARCHAR2', :length => length                      },
+            Class       => { :primitive => 'VARCHAR2', :length => length                      },
+            BigDecimal  => { :primitive => 'NUMBER',   :precision => precision, :scale => nil },
+            Float       => { :primitive => 'BINARY_FLOAT',                                    },
+            DateTime    => { :primitive => 'DATE'                                             },
+            Date        => { :primitive => 'DATE'                                             },
+            Time        => { :primitive => 'DATE'                                             },
+            TrueClass   => { :primitive => 'NUMBER',  :precision => 1, :scale => 0            },
+            Types::Text => { :primitive => 'CLOB'                                             },
           }.freeze
         end
 
@@ -1147,6 +1111,173 @@ module DataMapper
       end # module ClassMethods
     end # module PostgresAdapter
 
+   module SqlserverAdapter
+      DEFAULT_CHARACTER_SET = 'utf8'.freeze
+
+      # @api private
+      def self.included(base)
+        base.extend ClassMethods
+      end
+
+      # @api semipublic
+      def storage_exists?(storage_name)
+        select("SELECT name FROM sysobjects WHERE name LIKE ?", storage_name).first == storage_name
+      end
+
+      # @api semipublic
+      def field_exists?(storage_name, field_name)
+        result = select("SELECT c.name FROM sysobjects as o JOIN syscolumns AS c ON o.id = c.id WHERE o.name = #{quote_name(storage_name)} AND c.name LIKE ?", field_name).first
+        result ? result.field == field_name : false
+      end
+
+      module SQL #:nodoc:
+#        private  ## This cannot be private for current migrations
+
+        # @api private
+        def supports_serial?
+          true
+        end
+
+        # @api private
+        def supports_drop_table_if_exists?
+          false
+        end
+
+        # @api private
+        def schema_name
+          # TODO: is there a cleaner way to find out the current DB we are connected to?
+          @options[:path].split('/').last
+        end
+
+        # TODO: update dkubb/dm-more/dm-migrations to use schema_name and remove this
+
+        alias db_name schema_name
+
+        # @api private
+        def create_table_statement(connection, model, properties)
+          statement = <<-SQL.compress_lines
+            CREATE TABLE #{quote_name(model.storage_name(name))}
+            (#{properties.map { |property| property_schema_statement(connection, property_schema_hash(property)) }.join(', ')}
+          SQL
+
+          unless properties.any? { |property| property.serial? }
+            statement << ", PRIMARY KEY(#{properties.key.map { |property| quote_name(property.field) }.join(', ')})"
+          end
+
+          statement << ')'
+          statement
+        end
+
+        # @api private
+        def property_schema_hash(property)
+          schema = super
+
+          min = property.min
+          max = property.max
+
+          if property.primitive == Integer && min && max
+            schema[:primitive] = integer_column_statement(min..max)
+          end
+
+          if schema[:primitive] == 'TEXT'
+            schema.delete(:default)
+          end
+
+          schema
+        end
+
+        # @api private
+        def property_schema_statement(connection, schema)
+          if supports_serial? && schema[:serial]
+            statement = quote_name(schema[:name])
+            statement << " #{schema[:primitive]}"
+
+            length = schema[:length]
+
+            if schema[:precision] && schema[:scale]
+              statement << "(#{[ :precision, :scale ].map { |key| connection.quote_value(schema[key]) }.join(', ')})"
+            elsif length
+              statement << "(#{connection.quote_value(length)})"
+            end
+
+            statement << ' IDENTITY'
+          else
+            statement = super
+          end
+
+          statement
+        end
+
+        # @api private
+        def character_set
+          @character_set ||= show_variable('character_set_connection') || DEFAULT_CHARACTER_SET
+        end
+
+        # @api private
+        def collation
+          @collation ||= show_variable('collation_connection') || DEFAULT_COLLATION
+        end
+
+        # @api private
+        def show_variable(name)
+          raise "SqlserverAdapter#show_variable: Not implemented"
+        end
+
+        private
+
+        # Return SQL statement for the integer column
+        #
+        # @param [Range] range
+        #   the min/max allowed integers
+        #
+        # @return [String]
+        #   the statement to create the integer column
+        #
+        # @api private
+        def integer_column_statement(range)
+          min = range.first
+          max = range.last
+
+          smallint = 2**15
+          integer  = 2**31
+          bigint   = 2**63
+
+          if    min >= 0         && max < 2**8     then 'TINYINT'
+          elsif min >= -smallint && max < smallint then 'SMALLINT'
+          elsif min >= -integer  && max < integer  then 'INT'
+          elsif min >= -bigint   && max < bigint   then 'BIGINT'
+          else
+            raise ArgumentError, "min #{min} and max #{max} exceeds supported range"
+          end
+        end
+
+      end # module SQL
+
+      include SQL
+
+      module ClassMethods
+        # Types for Sqlserver databases.
+        #
+        # @return [Hash] types for Sqlserver databases.
+        #
+        # @api private
+        def type_map
+          length    = Property::DEFAULT_LENGTH
+          precision = Property::DEFAULT_PRECISION
+          scale     = Property::DEFAULT_SCALE_BIGDECIMAL
+
+          @type_map ||= super.merge(
+            DateTime    => { :primitive => 'DATETIME'                                         },
+            Date        => { :primitive => 'SMALLDATETIME'                                    },
+            Time        => { :primitive => 'SMALLDATETIME'                                    },
+            TrueClass   => { :primitive => 'BIT',                                             },
+            Types::Text => { :primitive => 'NVARCHAR', :length => 'max'                       }
+          ).freeze
+        end
+      end # module ClassMethods
+    end # module SqlserverAdapter
+
+
     module Repository
       # Determine whether a particular named storage exists in this repository
       #
@@ -1158,30 +1289,31 @@ module DataMapper
       #
       # @api semipublic
       def storage_exists?(storage_name)
+        adapter = self.adapter
         if adapter.respond_to?(:storage_exists?)
           adapter.storage_exists?(storage_name)
         end
       end
 
-      # TODO: document
       # @api semipublic
       def upgrade_model_storage(model)
+        adapter = self.adapter
         if adapter.respond_to?(:upgrade_model_storage)
           adapter.upgrade_model_storage(model)
         end
       end
 
-      # TODO: document
       # @api semipublic
       def create_model_storage(model)
+        adapter = self.adapter
         if adapter.respond_to?(:create_model_storage)
           adapter.create_model_storage(model)
         end
       end
 
-      # TODO: document
       # @api semipublic
       def destroy_model_storage(model)
+        adapter = self.adapter
         if adapter.respond_to?(:destroy_model_storage)
           adapter.destroy_model_storage(model)
         end
@@ -1206,13 +1338,11 @@ module DataMapper
     end # module Repository
 
     module Model
-      # TODO: document
       # @api private
       def self.included(mod)
         mod.descendants.each { |model| model.extend self }
       end
 
-      # TODO: document
       # @api semipublic
       def storage_exists?(repository_name = default_repository_name)
         repository(repository_name).storage_exists?(storage_name(repository_name))
@@ -1238,6 +1368,7 @@ module DataMapper
       # @api public
       def auto_upgrade!(repository_name = self.repository_name)
         assert_valid
+        base_model = self.base_model
         if base_model == self
           repository(repository_name).upgrade_model_storage(self)
         else
@@ -1254,6 +1385,7 @@ module DataMapper
       # @api private
       def auto_migrate_down!(repository_name = self.repository_name)
         assert_valid
+        base_model = self.base_model
         if base_model == self
           repository(repository_name).destroy_model_storage(self)
         else
@@ -1268,6 +1400,7 @@ module DataMapper
       # @api private
       def auto_migrate_up!(repository_name = self.repository_name)
         assert_valid
+        base_model = self.base_model
         if base_model == self
           repository(repository_name).create_model_storage(self)
         else
@@ -1280,7 +1413,6 @@ module DataMapper
   module Adapters
     extendable do
 
-      # TODO: document
       # @api private
       def const_added(const_name)
         if DataMapper::Migrations.const_defined?(const_name)
