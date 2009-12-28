@@ -1,9 +1,6 @@
 require 'pathname'
 require 'rubygems'
 
-gem 'addressable', '~>2.0'
-gem 'rspec',       '>1.1.2'
-
 require 'addressable/uri'
 require 'spec'
 
@@ -35,7 +32,8 @@ PRIMARY = {
 #  'sqlite3_fs' => "sqlite3://#{temp_db_dir}/primary.db",
   'mysql'      => 'mysql://localhost/dm_core_test',
   'postgres'   => 'postgres://localhost/dm_core_test',
-  'oracle'     => 'oracle://dm_core_test:dm_core_test@localhost/orcl'
+  'oracle'     => 'oracle://dm_core_test:dm_core_test@localhost/orcl',
+  'sqlserver'  => 'sqlserver://dm_core_test:dm_core_test@localhost/dm_core_test;instance=SQLEXPRESS'
 }
 
 ALTERNATE = {
@@ -45,7 +43,8 @@ ALTERNATE = {
 #  'sqlite3_fs' => "sqlite3://#{temp_db_dir}/alternate.db",
   'mysql'      => 'mysql://localhost/dm_core_test2',
   'postgres'   => 'postgres://localhost/dm_core_test2',
-  'oracle'     => 'oracle://dm_core_test2:dm_core_test2@localhost/orcl'
+  'oracle'     => 'oracle://dm_core_test2:dm_core_test2@localhost/orcl',
+  'sqlserver'  => 'sqlserver://dm_core_test:dm_core_test@localhost/dm_core_test2;instance=SQLEXPRESS'
 }
 
 # These environment variables will override the default connection string:
@@ -94,6 +93,36 @@ Spec::Runner.configure do |config|
   config.extend(DataMapper::Spec::AdapterHelpers)
   config.include(DataMapper::Spec::PendingHelpers)
 
+  def remove_ivars(object, instance_variables = object.instance_variables)
+    seen  = {}
+    stack = instance_variables.map { |var| [ object, var ] }
+
+    while node = stack.pop
+      object, ivar = node
+
+      # skip "global" and non-DM objects
+      next if object.kind_of?(DataMapper::Logger)               ||
+              object.kind_of?(DataMapper::Model::DescendantSet) ||
+              object.class.name[0, 13] == 'DataObjects::'
+
+      # skip classes and modules in the DataMapper namespace
+      next if object.kind_of?(Module) &&
+              object.name[0, 12] == 'DataMapper::'
+
+      # skip when the ivar is no longer defined in the object
+      next unless object.instance_variable_defined?(ivar)
+
+      value = object.instance_variable_get(ivar)
+      object.__send__(:remove_instance_variable, ivar) unless object.frozen?
+
+      # skip when the value was seen
+      next if seen.key?(value.object_id)
+      seen[value.object_id] = true
+
+      stack.concat value.instance_variables.map { |ivar| [ value, ivar ] }
+    end
+  end
+
   config.after :all do
     # global model cleanup
     descendants = DataMapper::Model.descendants.to_a
@@ -108,7 +137,33 @@ Spec::Runner.configure do |config|
         base.send(:remove_const, constant_name)
       end
 
+      remove_ivars(model)
+      model.instance_methods(false).each { |method| model.send(:undef_method, method) }
+
       DataMapper::Model.descendants.delete(model)
     end
   end
+
+  config.after :all do
+    # global ivar cleanup
+    remove_ivars(self, instance_variables.reject { |ivar| ivar[0, 2] == '@_' })
+  end
+
+  config.after :all do
+    # WTF: rspec holds a reference to the last match for some reason.
+    # When the object ivars are explicitly removed, this causes weird
+    # problems when rspec uses it (!).  Why rspec does this I have no
+    # idea because I cannot determine the intention from the code.
+    remove_ivars(Spec::Matchers.last_matcher, %w[ @expected ])
+  end
+end
+
+# remove the Resource#send method to ensure specs/internals do no rely on it
+module RemoveSend
+  def self.included(model)
+    model.send(:undef_method, :send)
+    model.send(:undef_method, :freeze)
+  end
+
+  DataMapper::Model.append_inclusions self
 end

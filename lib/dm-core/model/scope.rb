@@ -10,10 +10,11 @@ module DataMapper
     # It is also possible to get exclusive scope access
     # using +with_exclusive_scope+
     module Scope
-      # TODO: document
       # @api private
       def default_scope(repository_name = default_repository_name)
         @default_scope ||= {}
+
+        default_repository_name = self.default_repository_name
 
         @default_scope[repository_name] ||= if repository_name == default_repository_name
           {}
@@ -29,7 +30,6 @@ module DataMapper
         Query.new(repository, self, current_scope).freeze
       end
 
-      # TODO: document
       # @api private
       def current_scope
         scope_stack.last || default_scope(repository.name)
@@ -66,6 +66,7 @@ module DataMapper
           query.dup
         end
 
+        scope_stack = self.scope_stack
         scope_stack << query.options
 
         begin
@@ -75,13 +76,11 @@ module DataMapper
         end
       end
 
-      private
-
       # Initializes (if necessary) and returns current scope stack
       # @api private
       def scope_stack
         scope_stack_for = Thread.current[:dm_scope_stack] ||= {}
-        scope_stack_for[self] ||= []
+        scope_stack_for[object_id] ||= []
       end
     end # module Scope
 

@@ -455,7 +455,7 @@ describe DataMapper::Property do
       end
 
       it 'does not typecast non-time values' do
-        pending 'Time#parse is too permissive' do
+        pending_if 'Time#parse is too permissive', RUBY_VERSION <= '1.9.1' do
           @property.typecast('not-time').should eql('not-time')
         end
       end
@@ -517,13 +517,13 @@ describe DataMapper::Property do
       end
     end
 
-    describe 'when provide a nil value when not nullable' do
+    describe 'when provide a nil value when required' do
       it 'should return false' do
         @model.properties[:id].valid?(nil).should be_false
       end
     end
 
-    describe 'when provide a nil value when nullable' do
+    describe 'when provide a nil value when not required' do
       it 'should return false' do
         @model.properties[:alias].valid?(nil).should be_true
       end

@@ -50,6 +50,8 @@ module DataMapper
         # new Relationship objects to a supplied repository and model.  dup does not really
         # do what is needed
 
+        default_repository_name = self.default_repository_name
+
         @relationships[repository_name] ||= if repository_name == default_repository_name
           Mash.new
         else
@@ -62,7 +64,7 @@ module DataMapper
       #
       # @api public
       def n
-        1.0/0
+        Infinity
       end
 
       # A shorthand, clear syntax for defining one-to-one, one-to-many and
@@ -99,7 +101,7 @@ module DataMapper
       #
       # @api public
       def has(cardinality, name, *args)
-        assert_kind_of 'cardinality', cardinality, Integer, Range, n.class
+        assert_kind_of 'cardinality', cardinality, Integer, Range, Infinity.class
         assert_kind_of 'name',        name,        Symbol
 
         model   = extract_model(args)
@@ -122,7 +124,7 @@ module DataMapper
         options[:child_repository_name]  = options.delete(:repository)
         options[:parent_repository_name] = repository_name
 
-        klass = if options[:max] > 1
+        klass = if max > 1
           options.key?(:through) ? Associations::ManyToMany::Relationship : Associations::OneToMany::Relationship
         else
           Associations::OneToOne::Relationship
@@ -133,6 +135,9 @@ module DataMapper
         descendants.each do |descendant|
           descendant.relationships(repository_name)[name] ||= relationship
         end
+
+        create_relationship_reader(relationship)
+        create_relationship_writer(relationship)
 
         relationship
       end
@@ -162,11 +167,12 @@ module DataMapper
       def belongs_to(name, *args)
         assert_kind_of 'name', name, Symbol
 
-        model   = extract_model(args)
-        options = extract_options(args)
+        model_name = self.name
+        model      = extract_model(args)
+        options    = extract_options(args)
 
         if options.key?(:through)
-          warn "#{self.name}#belongs_to with :through is deprecated, use 'has 1, :#{name}, #{options.inspect}' in #{self.name} instead (#{caller[0]})"
+          warn "#{model_name}#belongs_to with :through is deprecated, use 'has 1, :#{name}, #{options.inspect}' in #{model_name} instead (#{caller[0]})"
           return has(1, name, model, options)
         end
 
@@ -189,6 +195,9 @@ module DataMapper
         descendants.each do |descendant|
           descendant.relationships(repository_name)[name] ||= relationship
         end
+
+        create_relationship_reader(relationship)
+        create_relationship_writer(relationship)
 
         relationship
       end
@@ -243,9 +252,9 @@ module DataMapper
       # @api private
       def extract_min_max(cardinality)
         case cardinality
-          when Integer then [ cardinality,       cardinality      ]
-          when Range   then [ cardinality.first, cardinality.last ]
-          when n       then [ 0,                 n                ]
+          when Integer  then [ cardinality,       cardinality      ]
+          when Range    then [ cardinality.first, cardinality.last ]
+          when Infinity then [ 0,                 Infinity         ]
         end
       end
 
@@ -258,38 +267,45 @@ module DataMapper
         # TODO: update to match Query#assert_valid_options
         #   - perform options normalization elsewhere
 
-        if options.key?(:min) && options.key?(:max)
-          assert_kind_of 'options[:min]', options[:min], Integer
-          assert_kind_of 'options[:max]', options[:max], Integer, n.class
+        caller_method = caller[1]
 
-          if options[:min] == n && options[:max] == n
+        if options.key?(:min) && options.key?(:max)
+          min = options[:min]
+          max = options[:max]
+
+          assert_kind_of 'options[:min]', min, Integer
+          assert_kind_of 'options[:max]', max, Integer, Infinity.class
+
+          if min == Infinity && max == Infinity
             raise ArgumentError, 'Cardinality may not be n..n.  The cardinality specifies the min/max number of results from the association'
-          elsif options[:min] > options[:max]
-            raise ArgumentError, "Cardinality min (#{options[:min]}) cannot be larger than the max (#{options[:max]})"
-          elsif options[:min] < 0
-            raise ArgumentError, "Cardinality min much be greater than or equal to 0, but was #{options[:min]}"
-          elsif options[:max] < 1
-            raise ArgumentError, "Cardinality max much be greater than or equal to 1, but was #{options[:max]}"
+          elsif min > max
+            raise ArgumentError, "Cardinality min (#{min}) cannot be larger than the max (#{max})"
+          elsif min < 0
+            raise ArgumentError, "Cardinality min much be greater than or equal to 0, but was #{min}"
+          elsif max < 1
+            raise ArgumentError, "Cardinality max much be greater than or equal to 1, but was #{max}"
           end
         end
 
         if options.key?(:repository)
-          assert_kind_of 'options[:repository]', options[:repository], Repository, Symbol
+          repository = options[:repository]
 
-          if options[:repository].kind_of?(Repository)
-            options[:repository] = options[:repository].name
+          assert_kind_of 'options[:repository]', repository, Repository, Symbol
+
+          if repository.kind_of?(Repository)
+            options[:repository] = repository.name
           end
         end
 
         if options.key?(:class_name)
           assert_kind_of 'options[:class_name]', options[:class_name], String
-          warn "+options[:class_name]+ is deprecated, use :model instead (#{caller[1]})"
+          warn "+options[:class_name]+ is deprecated, use :model instead (#{caller_method})"
           options[:model] = options.delete(:class_name)
         end
 
         if options.key?(:remote_name)
           assert_kind_of 'options[:remote_name]', options[:remote_name], Symbol
-          warn "+options[:remote_name]+ is deprecated, use :via instead (#{caller[1]})"
+          warn "+options[:remote_name]+ is deprecated, use :via instead (#{caller_method})"
           options[:via] = options.delete(:remote_name)
         end
 
@@ -307,8 +323,8 @@ module DataMapper
         # :target_key (will mean something different for each relationship)
 
         [ :child_key, :parent_key ].each do |key|
-          if options.key?(key)
-            assert_kind_of "options[#{key.inspect}]", options[key], Enumerable
+          if options.key?(key) && !options[key].is_a?(Enumerable)
+            options[key] = Array(options[key])
           end
         end
 
@@ -317,8 +333,45 @@ module DataMapper
         end
       end
 
+      # Dynamically defines reader method
+      #
+      # @api private
+      def create_relationship_reader(relationship)
+        name        = relationship.name
+        reader_name = name.to_s
+
+        return if resource_method_defined?(reader_name)
+
+        reader_visibility = relationship.reader_visibility
+
+        class_eval <<-RUBY, __FILE__, __LINE__ + 1
+          #{reader_visibility}                               # public
+          def #{reader_name}(query = nil)                    # def author(query = nil)
+            relationships[#{name.inspect}].get(self, query)  #   relationships[:author].get(self, query)
+          end                                                # end
+        RUBY
+      end
+
+      # Dynamically defines writer method
+      #
+      # @api private
+      def create_relationship_writer(relationship)
+        name        = relationship.name
+        writer_name = "#{name}="
+
+        return if resource_method_defined?(writer_name)
+
+        writer_visibility = relationship.writer_visibility
+
+        class_eval <<-RUBY, __FILE__, __LINE__ + 1
+          #{writer_visibility}                                # public
+          def #{writer_name}(target)                          # def author=(target)
+            relationships[#{name.inspect}].set(self, target)  #   relationships[:author].set(self, target)
+          end                                                 # end
+        RUBY
+      end
+
       chainable do
-        # TODO: document
         # @api public
         def method_missing(method, *args, &block)
           if relationship = relationships(repository_name)[method]

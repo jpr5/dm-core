@@ -40,12 +40,12 @@ end
           include DataMapper::Resource
 
           property :id,       Serial
-          property :title,    String, :nullable => false
+          property :title,    String, :required => true
           property :content,  Text
           property :subtitle, String
 
           has n, :authors, :through => Resource
-          belongs_to :original, self, :nullable => true
+          belongs_to :original, self, :required => false
           has n, :revisions, self, :child_key => [ :original_id ]
           has 1, :previous,  self, :child_key => [ :original_id ], :order => [ :id.desc ]
           has n, :publications, :through => Resource
@@ -94,6 +94,7 @@ end
       it_should_behave_like 'A public Association Collection'
       it_should_behave_like 'A Collection supporting Strategic Eager Loading' unless loaded
       it_should_behave_like 'Finder Interface'
+      it_should_behave_like 'Collection Finder Interface'
       it_should_behave_like 'A Limited Many to Many Collection'
     end
   end
@@ -129,7 +130,7 @@ end
           include DataMapper::Resource
 
           property :id,      Serial
-          property :title,   String, :nullable => false
+          property :title,   String, :required => true
           property :content, Text
           property :subtitle, String
 
@@ -137,7 +138,7 @@ end
 
           belongs_to :site
           has n, :authors, :through => :site
-          belongs_to :original, self, :nullable => true
+          belongs_to :original, self, :required => false
           has n, :revisions, self, :child_key => [ :original_id ]
           has 1, :previous,  self, :child_key => [ :original_id ], :order => [ :id.desc ]
           has n, :publications, :through => Resource
@@ -187,6 +188,7 @@ end
       it_should_behave_like 'A public Association Collection'
       it_should_behave_like 'A Collection supporting Strategic Eager Loading' unless loaded
       it_should_behave_like 'Finder Interface'
+      it_should_behave_like 'Collection Finder Interface'
       it_should_behave_like 'A Limited Many to Many Collection'
     end
   end

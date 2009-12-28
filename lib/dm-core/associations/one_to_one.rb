@@ -15,7 +15,7 @@ module DataMapper
         def get(source, other_query = nil)
           assert_kind_of 'source', source, source_model
 
-          return unless loaded?(source) || source_key.get(source).all? { |value| !value.nil? }
+          return unless loaded?(source) || valid_source?(source)
 
           relationship.get(source, other_query).first
         end
@@ -31,19 +31,16 @@ module DataMapper
           relationship.set(source, [ target ].compact).first
         end
 
-        # TODO: document
         # @api public
         def kind_of?(klass)
           super || relationship.kind_of?(klass)
         end
 
-        # TODO: document
         # @api public
         def instance_of?(klass)
           super || relationship.instance_of?(klass)
         end
 
-        # TODO: document
         # @api public
         def respond_to?(method, include_private = false)
           super || relationship.respond_to?(method, include_private)
@@ -63,7 +60,6 @@ module DataMapper
           @relationship = klass.new(name, target_model, source_model, options)
         end
 
-        # TODO: document
         # @api private
         def method_missing(method, *args, &block)
           relationship.send(method, *args, &block)

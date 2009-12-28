@@ -64,11 +64,16 @@ require dir / 'support' / 'naming_conventions'
 require dir / 'transaction'                     # TODO: move to dm-more
 require dir / 'version'
 
+require dir / 'core_ext' / 'enumerable'
 require dir / 'core_ext' / 'kernel'             # TODO: do not load automatically
 require dir / 'core_ext' / 'symbol'             # TODO: do not load automatically
 
 # A logger should always be present. Lets be consistent with DO
 DataMapper::Logger.new(StringIO.new, :fatal)
+
+unless defined?(Infinity)
+  Infinity = 1.0/0
+end
 
 # == Setup and Configuration
 # DataMapper uses URIs or a connection hash to connect to your data-store.
@@ -141,7 +146,6 @@ module DataMapper
   # and thus there is no FK value to use in the query.
   class UnsavedParentError < PersistenceError; end
 
-  # TODO: document
   # @api private
   def self.root
     @root ||= Pathname(__FILE__).dirname.parent.expand_path.freeze
@@ -165,10 +169,10 @@ module DataMapper
   #
   # @api public
   def self.setup(*args)
-    adapter = if args.first.kind_of?(Adapters::AbstractAdapter)
-      args.first
-    else
-      DataMapper::Adapters.new(*args)
+    adapter = args.first
+
+    unless adapter.kind_of?(Adapters::AbstractAdapter)
+      adapter = Adapters.new(*args)
     end
 
     Repository.adapters[adapter.name] = adapter
@@ -188,12 +192,17 @@ module DataMapper
   #
   # @api public
   def self.repository(name = nil)
+    context = Repository.context
+
     current_repository = if name
       assert_kind_of 'name', name, Symbol
-      Repository.context.detect { |repository| repository.name == name } || Repository.new(name)
+      context.detect { |repository| repository.name == name }
     else
-      Repository.context.last || Repository.new(Repository.default_name)
+      name = Repository.default_name
+      context.last
     end
+
+    current_repository ||= Repository.new(name)
 
     if block_given?
       current_repository.scope { |*block_args| yield(*block_args) }

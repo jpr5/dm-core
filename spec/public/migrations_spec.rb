@@ -243,6 +243,38 @@ describe DataMapper::Migrations do
           end
         end
       end
+
+      describe 'String property' do
+        before :all do
+          @model.property(:id, DataMapper::Types::Serial)
+        end
+
+        [
+          [ 1,          'VARCHAR(1)'   ],
+          [ 50,         'VARCHAR(50)'  ],
+          [ 255,        'VARCHAR(255)' ],
+          [ nil,        'VARCHAR(50)'  ],
+        ].each do |length, statement|
+          options = {}
+          options[:length] = length if length
+
+          describe "with a length of #{length}" do
+            before :all do
+              @property = @model.property(:title, String, options)
+
+              @response = capture_log(DataObjects::Mysql) { @model.auto_migrate! }
+            end
+
+            it 'should return true' do
+              @response.should be_true
+            end
+
+            it "should create a #{statement} column" do
+              @output.last.should =~ %r{\ACREATE TABLE `blog_articles` \(`id` INT\(10\) UNSIGNED NOT NULL AUTO_INCREMENT, `title` #{Regexp.escape(statement)}, PRIMARY KEY\(`id`\)\) ENGINE = InnoDB CHARACTER SET [a-z\d]+ COLLATE (?:[a-z\d](?:_?[a-z\d]+)*)\z}
+            end
+          end
+        end
+      end
     end
   end
 
@@ -353,6 +385,118 @@ describe DataMapper::Migrations do
             end
           end
         end
+      end
+
+      describe 'String property' do
+        before :all do
+          @model.property(:id, DataMapper::Types::Serial)
+        end
+
+        [
+          [ 1,          'VARCHAR(1)'   ],
+          [ 50,         'VARCHAR(50)'  ],
+          [ 255,        'VARCHAR(255)' ],
+          [ nil,        'VARCHAR(50)'  ],
+        ].each do |length, statement|
+          options = {}
+          options[:length] = length if length
+
+          describe "with a length of #{length}" do
+            before :all do
+              @property = @model.property(:title, String, options)
+
+              @response = capture_log(DataObjects::Postgres) { @model.auto_migrate! }
+            end
+
+            it 'should return true' do
+              @response.should be_true
+            end
+
+            it "should create a #{statement} column" do
+              @output[-2].should == "CREATE TABLE \"blog_articles\" (\"id\" SERIAL NOT NULL, \"title\" #{statement}, PRIMARY KEY(\"id\"))"
+            end
+          end
+        end
+      end
+    end
+  end
+
+  supported_by :sqlserver do
+    before :all do
+      module ::Blog
+        class Article
+          include DataMapper::Resource
+        end
+      end
+
+      @model = ::Blog::Article
+    end
+
+    describe '#auto_migrate' do
+      describe 'Integer property' do
+        [
+          [                    0,                   1, 'TINYINT'  ],
+          [                    0,                 255, 'TINYINT'  ],
+          [                    0,                 256, 'SMALLINT' ],
+          [                    0,               32767, 'SMALLINT' ],
+          [                    0,               32768, 'INT'      ],
+          [                    0,          2147483647, 'INT'      ],
+          [                    0,          2147483648, 'BIGINT'   ],
+          [                    0, 9223372036854775807, 'BIGINT'   ],
+
+          [                   -1,                   1, 'SMALLINT' ],
+          [                   -1,                 255, 'SMALLINT' ],
+          [                   -1,                 256, 'SMALLINT' ],
+          [                   -1,               32767, 'SMALLINT' ],
+          [                   -1,               32768, 'INT'      ],
+          [                   -1,          2147483647, 'INT'      ],
+          [                   -1,          2147483648, 'BIGINT'   ],
+          [                   -1, 9223372036854775807, 'BIGINT'   ],
+
+          [                   -1,                   0, 'SMALLINT' ],
+          [               -32768,                   0, 'SMALLINT' ],
+          [               -32769,                   0, 'INT'      ],
+          [          -2147483648,                   0, 'INT'      ],
+          [          -2147483649,                   0, 'BIGINT'   ],
+          [ -9223372036854775808,                   0, 'BIGINT'   ],
+
+          [                  nil,          2147483647, 'INT'      ],
+          [                    0,                 nil, 'INT'      ],
+          [                  nil,                 nil, 'INTEGER'  ],
+        ].each do |min, max, statement|
+          options = { :key => true }
+          options[:min] = min if min
+          options[:max] = max if max
+
+          describe "with a min of #{min} and a max of #{max}" do
+            before :all do
+              @property = @model.property(:id, Integer, options)
+
+              @response = capture_log(DataObjects::Sqlserver) { @model.auto_migrate! }
+            end
+
+            it 'should return true' do
+              @response.should be_true
+            end
+
+            it "should create a #{statement} column" do
+              @output.last.should == "CREATE TABLE \"blog_articles\" (\"id\" #{statement} NOT NULL, PRIMARY KEY(\"id\"))"
+            end
+
+            options.only(:min, :max).each do |key, value|
+              it "should allow the #{key} value #{value} to be stored" do
+                lambda {
+                  resource = @model.create(@property => value)
+                  @model.first(@property => value).should eql(resource)
+                }.should_not raise_error
+              end
+            end
+          end
+        end
+      end
+
+      describe 'String property' do
+        it 'needs specs'
       end
     end
   end

@@ -4,32 +4,33 @@ module DataMapper
       # Relationship class with implementation specific
       # to n side of 1 to n association
       class Relationship < Associations::Relationship
-        OPTIONS = superclass::OPTIONS.dup << :nullable
+        OPTIONS = superclass::OPTIONS.dup << :required
 
-        # TODO: document
         # @api semipublic
         alias source_repository_name child_repository_name
 
-        # TODO: document
         # @api semipublic
         alias source_model child_model
 
-        # TODO: document
         # @api semipublic
         alias target_repository_name parent_repository_name
 
-        # TODO: document
         # @api semipublic
         alias target_model parent_model
 
-        # TODO: document
         # @api semipublic
         alias target_key parent_key
 
-        # TODO: document
         # @api semipublic
+        def required?
+          @required
+        end
+
+        # @api private
         def nullable?
-          @nullable
+          klass = self.class
+          warn "#{klass}#nullable? is deprecated, use #{klass}#required? instead (#{caller[0]})"
+          !required?
         end
 
         # Returns a set of keys that identify child model
@@ -39,8 +40,9 @@ module DataMapper
         def child_key
           return @child_key if defined?(@child_key)
 
+          model           = child_model
           repository_name = child_repository_name || parent_repository_name
-          properties      = child_model.properties(repository_name)
+          properties      = model.properties(repository_name)
 
           child_key = parent_key.zip(@child_properties || []).map do |parent_property, property_name|
             property_name ||= "#{name}_#{parent_property.name}".to_sym
@@ -49,7 +51,7 @@ module DataMapper
               # create the property within the correct repository
               DataMapper.repository(repository_name) do
                 type = parent_property.send(parent_property.type == DataMapper::Types::Boolean ? :type : :primitive)
-                child_model.property(property_name, type, child_key_options(parent_property))
+                model.property(property_name, type, child_key_options(parent_property))
               end
             end
           end
@@ -57,9 +59,23 @@ module DataMapper
           @child_key = properties.class.new(child_key).freeze
         end
 
-        # TODO: document
         # @api semipublic
         alias source_key child_key
+
+        # Returns a hash of conditions that scopes query that fetches
+        # target object
+        #
+        # @return [Hash]
+        #   Hash of conditions that scopes query
+        #
+        # @api private
+        def source_scope(source)
+          if source.kind_of?(Resource)
+            Query.target_conditions(source, source_key, target_key)
+          else
+            super
+          end
+        end
 
         # Returns a Resource for this relationship with a given source
         #
@@ -112,6 +128,8 @@ module DataMapper
         #
         # @api semipublic
         def set(source, target)
+          target_model = self.target_model
+
           assert_kind_of 'source', source, source_model
           assert_kind_of 'target', target, target_model, Hash, NilClass
 
@@ -129,9 +147,16 @@ module DataMapper
         #
         # @api semipublic
         def initialize(name, source_model, target_model, options = {})
-          @nullable      = options.fetch(:nullable, false)
+          if options.key?(:nullable)
+            nullable_options = options.only(:nullable)
+            required_options = { :required => !options.delete(:nullable) }
+            warn "#{nullable_options.inspect} is deprecated, use #{required_options.inspect} instead (#{caller[2]})"
+            options.update(required_options)
+          end
+
+          @required      = options.fetch(:required, true)
           target_model ||= Extlib::Inflection.camelize(name)
-          options        = { :min => @nullable ? 0 : 1, :max => 1 }.update(options)
+          options        = { :min => @required ? 1 : 0, :max => 1 }.update(options)
           super
         end
 
@@ -145,11 +170,12 @@ module DataMapper
         #
         # @api private
         def lazy_load(source)
-          return unless source_key.get(source).all? { |value| !value.nil? }
+          return unless valid_source?(source)
 
           # SEL: load all related resources in the source collection
-          if source.saved? && source.collection.size > 1
-            eager_load(source.collection)
+          collection = source.collection
+          if source.saved? && collection.size > 1
+            eager_load(collection)
           end
 
           unless loaded?(source)
@@ -187,19 +213,20 @@ module DataMapper
           super || Extlib::Inflection.underscore(Extlib::Inflection.demodulize(source_model.name)).pluralize.to_sym
         end
 
-        # TODO: document
         # @api private
         def child_key_options(parent_property)
-          options = parent_property.options.only(:length, :precision, :scale).update(:index => name, :nullable => nullable?)
+          options = parent_property.options.only(:length, :precision, :scale).update(:index => name, :required => required?)
 
-          if parent_property.primitive == Integer && parent_property.min && parent_property.max
-            options.update(:min => parent_property.min, :max => parent_property.max)
+          min = parent_property.min
+          max = parent_property.max
+
+          if parent_property.primitive == Integer && min && max
+            options.update(:min => min, :max => max)
           end
 
           options
         end
 
-        # TODO: document
         # @api private
         def child_properties
           child_key.map { |property| property.name }

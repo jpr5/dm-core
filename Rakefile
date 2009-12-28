@@ -1,29 +1,30 @@
-require 'pathname'
 require 'rubygems'
 require 'rake'
-require 'rake/rdoctask'
 
-ROOT = Pathname(__FILE__).dirname.expand_path
+begin
+  gem 'jeweler', '~> 1.4'
+  require 'jeweler'
 
-require ROOT + 'lib/dm-core/version'
+  Jeweler::Tasks.new do |gem|
+    gem.name        = 'dm-core'
+    gem.summary     = 'An Object/Relational Mapper for Ruby'
+    gem.description = 'Faster, Better, Simpler.'
+    gem.email       = 'dan.kubb@gmail.com'
+    gem.homepage    = 'http://github.com/datamapper/dm-core'
+    gem.authors     = [ 'Dan Kubb' ]
 
-AUTHOR           = 'Dan Kubb'
-EMAIL            = 'dan.kubb@gmail.com'
-GEM_NAME         = 'dm-core'
-GEM_VERSION      = DataMapper::VERSION
-GEM_DEPENDENCIES = [
-  %w[ extlib      ~>0.9.14 ],
-  %w[ addressable ~>2.1    ],
-]
+    gem.rubyforge_project = 'datamapper'
 
-PROJECT_NAME        = 'datamapper'
-PROJECT_DESCRIPTION = 'Faster, Better, Simpler.'
-PROJECT_SUMMARY     = 'An Object/Relational Mapper for Ruby'
-PROJECT_URL         = 'http://datamapper.org'
+    gem.add_dependency 'extlib',      '~> 0.9.14'
+    gem.add_dependency 'addressable', '~> 2.1'
 
-require ROOT + 'tasks/hoe'
-require ROOT + 'tasks/gemspec'
-require ROOT + 'tasks/install'
-require ROOT + 'tasks/dm'
-require ROOT + 'tasks/doc'
-require ROOT + 'tasks/ci'
+    gem.add_development_dependency 'rspec', '~> 1.2.9'
+    gem.add_development_dependency 'yard',  '~> 0.4.0'
+  end
+
+  Jeweler::GemcutterTasks.new
+
+  FileList['tasks/**/*.rake'].each { |task| import task }
+rescue LoadError
+  puts 'Jeweler (or a dependency) not available. Install it with: gem install jeweler'
+end

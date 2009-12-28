@@ -5,7 +5,6 @@ module DataMapper
       default   false
       lazy      true
 
-      # TODO: document
       # @api private
       def self.bind(property)
         repository_name = property.repository_name
@@ -22,10 +21,17 @@ module DataMapper
           end
 
           def destroy
+            paranoid_destroy
+          end
+
+          def paranoid_destroy
             self.class.paranoid_properties.each do |name, blk|
               attribute_set(name, blk.call(self))
             end
-            save
+            save_self
+            @_destroyed = true
+            @_readonly  = true
+            reset
           end
         RUBY
 

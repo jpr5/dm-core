@@ -47,20 +47,23 @@ module DataMapper
     #
     # @api private
     def self.target_conditions(source, source_key, target_key)
-      source_values = []
+      target_key_size = target_key.size
+      source_values   = []
 
       if source.nil?
-        source_values << [ nil ] * target_key.size
+        source_values << [ nil ] * target_key_size
       else
         Array(source).each do |resource|
           next unless source_key.loaded?(resource)
-          source_values << source_key.get!(resource)
+          source_value = source_key.get!(resource)
+          next unless target_key.valid?(source_value)
+          source_values << source_value
         end
       end
 
       source_values.uniq!
 
-      if target_key.size == 1
+      if target_key_size == 1
         target_key = target_key.first
         source_values.flatten!
 
@@ -83,6 +86,29 @@ module DataMapper
         end
 
         or_operation
+      end
+    end
+
+    # @param [Repository] repository
+    #   the default repository to scope the query within
+    # @param [Model] model
+    #   the default model for the query
+    # @param [#query, Enumerable] source
+    #   the source to generate the query with
+    #
+    # @return [Query]
+    #   the query to match the resources with
+    #
+    # @api private
+    def self.target_query(repository, model, source)
+      if source.respond_to?(:query)
+        source.query
+      elsif source.kind_of?(Enumerable)
+        key        = model.key(repository.name)
+        conditions = Query.target_conditions(source, key, key)
+        Query.new(repository, model, :conditions => conditions)
+      else
+        raise ArgumentError, "+source+ must respond to #query or be an Enumerable, but was #{source.class}"
       end
     end
 
@@ -173,7 +199,7 @@ module DataMapper
     #
     #   Document.all(:limit => 10)
     #
-    # @return [Integer, NilClass]
+    # @return [Integer, nil]
     #   the maximum number of results
     #
     # @api semipublic
@@ -325,7 +351,7 @@ module DataMapper
     def update(other)
       assert_kind_of 'other', other, self.class, Hash
 
-      other_options = if other.kind_of?(self.class)
+      other_options = if kind_of?(other.class)
         return self if self.eql?(other)
         assert_valid_other(other)
         other.options
@@ -343,7 +369,7 @@ module DataMapper
       end
 
       merge_conditions([ other_options.except(*OPTIONS), other_options[:conditions] ])
-      normalize_options(normalize)
+      normalize_options(normalize | [ :links, :unique ])
 
       self
     end
@@ -377,17 +403,67 @@ module DataMapper
     def relative(options)
       assert_kind_of 'options', options, Hash
 
-      options = options.dup
+      offset = nil
+      limit  = self.limit
 
-      if options.key?(:offset) && (options.key?(:limit) || self.limit)
-        offset = options.delete(:offset)
-        limit  = options.delete(:limit) || self.limit - offset
-
-        merge(options).slice!(offset, limit)
-      else
-        merge(options)
+      if options.key?(:offset) && (options.key?(:limit) || limit)
+        options = options.dup
+        offset  = options.delete(:offset)
+        limit   = options.delete(:limit) || limit - offset
       end
+
+      query = merge(options)
+      query = query.slice!(offset, limit) if offset
+      query
     end
+
+    # Return the union with another query
+    #
+    # @param [Query] other
+    #   the other query
+    #
+    # @return [Query]
+    #   the union of the query and other
+    #
+    # @api semipublic
+    def union(other)
+      return dup if self == other
+      set_operation(:union, other)
+    end
+
+    alias | union
+    alias + union
+
+    # Return the intersection with another query
+    #
+    # @param [Query] other
+    #   the other query
+    #
+    # @return [Query]
+    #   the intersection of the query and other
+    #
+    # @api semipublic
+    def intersection(other)
+      return dup if self == other
+      set_operation(:intersection, other)
+    end
+
+    alias & intersection
+
+    # Return the difference with another query
+    #
+    # @param [Query] other
+    #   the other query
+    #
+    # @return [Query]
+    #   the difference of the query and other
+    #
+    # @api semipublic
+    def difference(other)
+      set_operation(:difference, other)
+    end
+
+    alias - difference
 
     # Clear conditions
     #
@@ -428,6 +504,7 @@ module DataMapper
     #
     # @api semipublic
     def match_records(records)
+      conditions = self.conditions
       return records if conditions.nil?
       records.select { |record| conditions.matches?(record) }
     end
@@ -461,7 +538,9 @@ module DataMapper
     #
     # @api semipublic
     def limit_records(records)
-      size = records.size
+      offset = self.offset
+      limit  = self.limit
+      size   = records.size
 
       if offset > size - 1
         []
@@ -551,7 +630,9 @@ module DataMapper
       properties = Set.new
 
       each_comparison do |comparison|
-        properties << comparison.subject if comparison.subject.kind_of?(Property)
+        next unless comparison.respond_to?(:subject)
+        subject = comparison.subject
+        properties << subject if subject.kind_of?(Property)
       end
 
       properties
@@ -565,6 +646,52 @@ module DataMapper
     # @api private
     def sorted_fields
       fields.sort_by { |property| property.hash }
+    end
+
+    # Transform Query into subquery conditions
+    #
+    # @return [AndOperation]
+    #   a subquery for the Query
+    #
+    # @api private
+    def to_subquery
+      collection = model.all(merge(:fields => model_key))
+      Conditions::Operation.new(:and, Conditions::Comparison.new(:in, self_relationship, collection))
+    end
+
+    # Hash representation of a Query
+    #
+    # @return [Hash]
+    #   Hash representation of a Query
+    #
+    # @api private
+    def to_hash
+      {
+        :repository   => repository.name,
+        :model        => model.name,
+        :fields       => fields,
+        :links        => links,
+        :conditions   => conditions,
+        :offset       => offset,
+        :limit        => limit,
+        :order        => order,
+        :unique       => unique?,
+        :add_reversed => add_reversed?,
+        :reload       => reload?,
+      }
+    end
+
+    # Extract options from a Query
+    #
+    # @param [Query] query
+    #   the query to extract options from
+    #
+    # @return [Hash]
+    #   the options to use to initialize the new query
+    #
+    # @api private
+    def to_relative_hash
+      to_hash.only(:fields, :order, :unique, :add_reversed, :reload)
     end
 
     private
@@ -602,7 +729,7 @@ module DataMapper
       assert_valid_options(@options)
 
       @fields       = @options.fetch :fields,       @properties.defaults
-      @links        = @options.fetch :links,        []
+      @links        = @options.key?(:links) ? @options[:links].dup : []
       @conditions   = Conditions::Operation.new(:null)
       @offset       = @options.fetch :offset,       0
       @limit        = @options.fetch :limit,        nil
@@ -611,8 +738,6 @@ module DataMapper
       @add_reversed = @options.fetch :add_reversed, false
       @reload       = @options.fetch :reload,       false
       @raw          = false
-
-      @links = @links.dup
 
       merge_conditions([ @options.except(*OPTIONS), @options[:conditions] ])
       normalize_options
@@ -625,7 +750,7 @@ module DataMapper
       @fields     = @fields.dup
       @links      = @links.dup
       @conditions = @conditions.dup
-      @order      = @order.dup
+      @order      = @order.try_dup
     end
 
     # Validate the options
@@ -662,15 +787,15 @@ module DataMapper
     def assert_valid_fields(fields, unique)
       assert_kind_of 'options[:fields]', fields, Array
 
-      if fields.empty? && unique == false
-        raise ArgumentError, '+options[:fields]+ should not be empty if +options[:unique]+ is false'
-      end
+      model = self.model
 
       fields.each do |field|
+        inspect = field.inspect
+
         case field
           when Symbol, String
             unless @properties.named?(field)
-              raise ArgumentError, "+options[:fields]+ entry #{field.inspect} does not map to a property in #{model}"
+              raise ArgumentError, "+options[:fields]+ entry #{inspect} does not map to a property in #{model}"
             end
 
           when Property
@@ -679,7 +804,7 @@ module DataMapper
             end
 
           else
-            raise ArgumentError, "+options[:fields]+ entry #{field.inspect} of an unsupported object #{field.class}"
+            raise ArgumentError, "+options[:fields]+ entry #{inspect} of an unsupported object #{field.class}"
         end
       end
     end
@@ -696,10 +821,12 @@ module DataMapper
       end
 
       links.each do |link|
+        inspect = link.inspect
+
         case link
           when Symbol, String
             unless @relationships.key?(link.to_sym)
-              raise ArgumentError, "+options[:links]+ entry #{link.inspect} does not map to a relationship in #{model}"
+              raise ArgumentError, "+options[:links]+ entry #{inspect} does not map to a relationship in #{model}"
             end
 
           when Associations::Relationship
@@ -709,7 +836,7 @@ module DataMapper
             #end
 
           else
-            raise ArgumentError, "+options[:links]+ entry #{link.inspect} of an unsupported object #{link.class}"
+            raise ArgumentError, "+options[:links]+ entry #{inspect} of an unsupported object #{link.class}"
         end
       end
     end
@@ -724,22 +851,22 @@ module DataMapper
       case conditions
         when Hash
           conditions.each do |subject, bind_value|
+            inspect = subject.inspect
+
             case subject
               when Symbol, String
                 unless subject.to_s.include?('.') || @properties.named?(subject) || @relationships.key?(subject)
-                  raise ArgumentError, "condition #{subject.inspect} does not map to a property or relationship in #{model}"
+                  raise ArgumentError, "condition #{inspect} does not map to a property or relationship in #{model}"
                 end
 
               when Operator
-                unless (Conditions::Comparison.slugs | [ :not ]).include?(subject.operator)
-                  raise ArgumentError, "condition #{subject.inspect} used an invalid operator #{subject.operator}"
+                operator = subject.operator
+
+                unless (Conditions::Comparison.slugs | [ :not ]).include?(operator)
+                  raise ArgumentError, "condition #{inspect} used an invalid operator #{operator}"
                 end
 
                 assert_valid_conditions(subject.target => bind_value)
-
-                if subject.operator == :not && bind_value.kind_of?(Array) && bind_value.empty?
-                  raise ArgumentError, "Cannot use 'not' operator with a bind value that is an empty Array for #{subject.inspect}"
-                end
 
               when Path
                 assert_valid_links(subject.relationships)
@@ -752,7 +879,7 @@ module DataMapper
                 #end
 
               else
-                raise ArgumentError, "condition #{subject.inspect} of an unsupported object #{subject.class}"
+                raise ArgumentError, "condition #{inspect} of an unsupported object #{subject.class}"
             end
           end
 
@@ -761,7 +888,9 @@ module DataMapper
             raise ArgumentError, '+options[:conditions]+ should not be empty'
           end
 
-          unless conditions.first.kind_of?(String) && !conditions.first.blank?
+          first_condition = conditions.first
+
+          unless first_condition.kind_of?(String) && !first_condition.blank?
             raise ArgumentError, '+options[:conditions]+ should have a statement for the first entry'
           end
       end
@@ -802,17 +931,20 @@ module DataMapper
     def assert_valid_order(order, fields)
       return if order.nil?
 
-      assert_kind_of 'options[:order]', order, Array
-
+      order = Array(order)
       if order.empty? && fields && fields.any? { |property| !property.kind_of?(Operator) }
         raise ArgumentError, '+options[:order]+ should not be empty if +options[:fields] contains a non-operator'
       end
 
+      model = self.model
+
       order.each do |order_entry|
+        inspect = order_entry.inspect
+
         case order_entry
           when Symbol, String
             unless @properties.named?(order_entry)
-              raise ArgumentError, "+options[:order]+ entry #{order_entry.inspect} does not map to a property in #{model}"
+              raise ArgumentError, "+options[:order]+ entry #{inspect} does not map to a property in #{model}"
             end
 
           when Property
@@ -821,14 +953,16 @@ module DataMapper
             end
 
           when Operator, Direction
-            unless order_entry.operator == :asc || order_entry.operator == :desc
-              raise ArgumentError, "+options[:order]+ entry #{order_entry.inspect} used an invalid operator #{order_entry.operator}"
+            operator = order_entry.operator
+
+            unless operator == :asc || operator == :desc
+              raise ArgumentError, "+options[:order]+ entry #{inspect} used an invalid operator #{operator}"
             end
 
             assert_valid_order([ order_entry.target ], fields)
 
           else
-            raise ArgumentError, "+options[:order]+ entry #{order_entry.inspect} of an unsupported object #{order_entry.class}"
+            raise ArgumentError, "+options[:order]+ entry #{inspect} of an unsupported object #{order_entry.class}"
         end
       end
     end
@@ -846,12 +980,19 @@ module DataMapper
     #
     # @api private
     def assert_valid_other(other)
-      unless other.repository == repository
-        raise ArgumentError, "+other+ #{other.class} must be for the #{repository.name} repository, not #{other.repository.name}"
+      other_repository = other.repository
+      repository       = self.repository
+      other_class      = other.class
+
+      unless other_repository == repository
+        raise ArgumentError, "+other+ #{other_class} must be for the #{repository.name} repository, not #{other_repository.name}"
       end
 
-      unless other.model >= model
-        raise ArgumentError, "+other+ #{other.class} must be for the #{model.name} model, not #{other.model.name}"
+      other_model = other.model
+      model       = self.model
+
+      unless other_model >= model
+        raise ArgumentError, "+other+ #{other_class} must be for the #{model.name} model, not #{other_model.name}"
       end
     end
 
@@ -894,7 +1035,7 @@ module DataMapper
     #
     # @api private
     def normalize_options(options = OPTIONS)
-      (options & [ :order, :fields, :links ]).each do |option|
+      (options & [ :order, :fields, :links, :unique ]).each do |option|
         send("normalize_#{option}")
       end
     end
@@ -907,6 +1048,7 @@ module DataMapper
 
       # TODO: should Query::Path objects be permitted?  If so, then it
       # should probably be normalized to a Direction object
+      @order = Array(@order)
       @order = @order.map do |order|
         case order
           when Operator
@@ -950,21 +1092,19 @@ module DataMapper
     #
     # @api private
     def normalize_links
-      links = @links.dup
+      stack = @links.dup
 
       @links.clear
 
-      while link = links.pop
+      while link = stack.pop
         relationship = case link
           when Symbol, String             then @relationships[link]
           when Associations::Relationship then link
         end
 
-        next if @links.include?(relationship)
-
         if relationship.respond_to?(:links)
-          links.concat(relationship.links)
-        else
+          stack.concat(relationship.links)
+        elsif !@links.include?(relationship)
           repository_name = relationship.relative_target_repository_name
           model           = relationship.target_model
 
@@ -994,6 +1134,16 @@ module DataMapper
       @links.reverse!
     end
 
+    # Normalize the unique attribute
+    #
+    # If any links are present, and the unique attribute was not
+    # explicitly specified, then make sure the query is marked as unique
+    #
+    # @api private
+    def normalize_unique
+      @unique = @links.any? unless @options.key?(:unique)
+    end
+
     # Append conditions to this Query
     #
     #   TODO: needs example
@@ -1021,43 +1171,62 @@ module DataMapper
       end
     end
 
-    # TODO: document
     # @api private
-    def append_property_condition(property, bind_value, operator)
-      bind_value = normalize_bind_value(property, bind_value)
-      negated    = operator == :not
+    def append_property_condition(subject, bind_value, operator)
+      negated = operator == :not
 
       if operator == :eql || negated
-        operator = case bind_value
-          when Array, Range, Set, Collection then :in
-          when Regexp                        then :regexp
-          else                                    :eql
+        # transform :relationship => nil into :relationship.not => association
+        if subject.respond_to?(:collection_for) && bind_value.nil?
+          negated    = !negated
+          bind_value = collection_for_nil(subject)
         end
+
+        operator = equality_operator_for_type(bind_value)
       end
 
-      condition = Conditions::Comparison.new(operator, property, bind_value)
+      condition = Conditions::Comparison.new(operator, subject, bind_value)
 
       if negated
-        condition = Conditions::Operation.new(:not) << condition
+        condition = Conditions::Operation.new(:not, condition)
       end
 
       add_condition(condition)
     end
 
-    # TODO: document
+    if RUBY_VERSION >= '1.9'
+      def equality_operator_for_type(bind_value)
+        case bind_value
+          when Enumerable then :in
+          when Regexp     then :regexp
+          else                 :eql
+        end
+      end
+    else
+      def equality_operator_for_type(bind_value)
+        case bind_value
+          when String     then :eql
+          when Enumerable then :in
+          when Regexp     then :regexp
+          else                 :eql
+        end
+      end
+    end
+
     # @api private
     def append_symbol_condition(symbol, bind_value, model, operator)
       append_condition(symbol.to_s, bind_value, model, operator)
     end
 
-    # TODO: document
     # @api private
     def append_string_condition(string, bind_value, model, operator)
       if string.include?('.')
         query_path = model
 
         target_components = string.split('.')
-        operator = target_components.pop.to_sym if DataMapper::Query::Conditions::Comparison.slugs.map{ |s| s.to_s }.include? target_components.last
+        last_component    = target_components.last
+        operator          = target_components.pop.to_sym if DataMapper::Query::Conditions::Comparison.slugs.any? { |slug| slug.to_s == last_component }
+
         target_components.each { |method| query_path = query_path.send(method) }
 
         append_condition(query_path, bind_value, model, operator)
@@ -1070,13 +1239,11 @@ module DataMapper
       end
     end
 
-    # TODO: document
     # @api private
     def append_operator_conditions(operator, bind_value, model)
       append_condition(operator.target, bind_value, model, operator.operator)
     end
 
-    # TODO: document
     # @api private
     def append_path(path, bind_value, model, operator)
       path.relationships.each do |relationship|
@@ -1100,65 +1267,59 @@ module DataMapper
       @conditions << condition
     end
 
-    # TODO: make this typecast all bind values that do not match the
-    # property primitive
-
-    # TODO: document
-    # @api private
-    def normalize_bind_value(property_or_path, bind_value)
-      # TODO: defer this inside the comparison
-      if bind_value.respond_to?(:call)
-        bind_value = bind_value.call
-      end
-
-      # TODO: bypass this for Collection, once subqueries can be handled by adapters
-      if bind_value.respond_to?(:to_ary)
-        bind_value = bind_value.to_ary
-        bind_value.uniq!
-      end
-
-      # FIXME: causes m:m specs to fail with in-memory adapter
-      # if bind_value.instance_of?(Array) && bind_value.size == 1
-      #   bind_value = bind_value.first
-      # end
-
-      bind_value
-    end
-
     # Extract arguments for #slice and #slice! then return offset and limit
     #
     # @param [Integer, Array(Integer), Range] *args the offset,
     #   offset and limit, or range indicating first and last position
     #
     # @return [Integer] the offset
-    # @return [Integer, NilClass] the limit, if any
+    # @return [Integer, nil] the limit, if any
     #
     # @api private
     def extract_slice_arguments(*args)
-      first_arg, second_arg = args
-
-      if args.size == 2 && first_arg.kind_of?(Integer) && second_arg.kind_of?(Integer)
-        return first_arg, second_arg
-      elsif args.size == 1
-        if first_arg.kind_of?(Integer)
-          return first_arg, 1
-        elsif first_arg.kind_of?(Range)
-          offset = first_arg.first
-          limit  = first_arg.last - offset
-          limit += 1 unless first_arg.exclude_end?
-          return offset, limit
-        end
+      offset, limit = case args.size
+        when 2 then extract_offset_limit_from_two_arguments(*args)
+        when 1 then extract_offset_limit_from_one_argument(*args)
       end
+
+      return offset, limit if offset && limit
 
       raise ArgumentError, "arguments may be 1 or 2 Integers, or 1 Range object, was: #{args.inspect}"
     end
 
-    # TODO: document
+    # @api private
+    def extract_offset_limit_from_two_arguments(*args)
+      args if args.all? { |arg| arg.kind_of?(Integer) }
+    end
+
+    # @api private
+    def extract_offset_limit_from_one_argument(arg)
+      case arg
+        when Integer then extract_offset_limit_from_integer(arg)
+        when Range   then extract_offset_limit_from_range(arg)
+      end
+    end
+
+    # @api private
+    def extract_offset_limit_from_integer(integer)
+      [ integer, 1 ]
+    end
+
+    # @api private
+    def extract_offset_limit_from_range(range)
+      offset = range.first
+      limit  = range.last - offset
+      limit  = limit.succ unless range.exclude_end?
+      return offset, limit
+    end
+
     # @api private
     def get_relative_position(offset, limit)
-      new_offset = self.offset + offset
+      self_offset = self.offset
+      self_limit  = self.limit
+      new_offset  = self_offset + offset
 
-      if limit <= 0 || (self.limit && new_offset + limit > self.offset + self.limit)
+      if limit <= 0 || (self_limit && new_offset + limit > self_offset + self_limit)
         raise RangeError, "offset #{offset} and limit #{limit} are outside allowed range"
       end
 
@@ -1176,7 +1337,17 @@ module DataMapper
       end
     end
 
-    # TODO: document
+    # @api private
+    def collection_for_nil(relationship)
+      query = relationship.query.dup
+
+      relationship.target_key.each do |target_key|
+        query[target_key.name.not] = nil if target_key.allow_nil?
+      end
+
+      relationship.target_model.all(query)
+    end
+
     # @api private
     def each_comparison
       operands = conditions.operands.to_a
@@ -1188,6 +1359,100 @@ module DataMapper
           yield operand
         end
       end
+    end
+
+    # Apply a set operation on self and another query
+    #
+    # @param [Symbol] operation
+    #   the set operation to apply
+    # @param [Query] other
+    #   the other query to apply the set operation on
+    #
+    # @return [Query]
+    #   the query that was created for the set operation
+    #
+    # @api private
+    def set_operation(operation, other)
+      assert_valid_other(other)
+      query = self.class.new(@repository, @model, other.to_relative_hash)
+      query.instance_variable_set(:@conditions, other_conditions(other, operation))
+      query
+    end
+
+    # Return the union with another query's conditions
+    #
+    # @param [Query] other
+    #   the query conditions to union with
+    #
+    # @return [OrOperation]
+    #   the union of the query conditions and other conditions
+    #
+    # @api private
+    def other_conditions(other, operation)
+      query_conditions(self).send(operation, query_conditions(other))
+    end
+
+    # Extract conditions from a Query
+    #
+    # @param [Query] query
+    #   the query with conditions
+    #
+    # @return [AbstractOperation]
+    #   the operation
+    #
+    # @api private
+    def query_conditions(query)
+      if query.limit || query.links.any?
+        query.to_subquery
+      else
+        query.conditions
+      end
+    end
+
+    # Return a self referrential relationship
+    #
+    # @return [Associations::OneToMany::Relationship]
+    #   the 1:m association to the same model
+    #
+    # @api private
+    def self_relationship
+      @self_relationship ||=
+        begin
+          model = self.model
+          Associations::OneToMany::Relationship.new(
+            :self,
+            model,
+            model,
+            self_relationship_options
+            )
+        end
+    end
+
+    # Return options for the self referrential relationship
+    #
+    # @return [Hash]
+    #   the options to use with the self referrential relationship
+    #
+    # @api private
+    def self_relationship_options
+      keys       = model_key.map { |property| property.name }
+      repository = self.repository
+      {
+        :child_key              => keys,
+        :parent_key             => keys,
+        :child_repository_name  => repository,
+        :parent_repository_name => repository,
+      }
+    end
+
+    # Return the model key
+    #
+    # @return [PropertySet]
+    #   the model key
+    #
+    # @api private
+    def model_key
+      @properties.key
     end
   end # class Query
 end # module DataMapper
