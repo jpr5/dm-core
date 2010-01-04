@@ -521,16 +521,10 @@ describe DataMapper::Query do
 
           it { @return.should be_kind_of(DataMapper::Query) }
 
-          it 'should set the conditions' do
-            @return.conditions.should ==
-              DataMapper::Query::Conditions::Operation.new(
-                :and,
-                DataMapper::Query::Conditions::Comparison.new(
-                  :eql,
-                  @model.referrer.name,
-                  'Dan Kubb'
-                )
-              )
+          it 'should not set the conditions' do
+            pending do
+              @return.conditions.should be_nil
+            end
           end
 
           it 'should set the links' do
@@ -550,16 +544,10 @@ describe DataMapper::Query do
 
           it { @return.should be_kind_of(DataMapper::Query) }
 
-          it 'should set the conditions' do
-            @return.conditions.should ==
-              DataMapper::Query::Conditions::Operation.new(
-                :and,
-                DataMapper::Query::Conditions::Comparison.new(
-                  :eql,
-                  @model.referrer.name,
-                  'Dan Kubb'
-                )
-              )
+          it 'should not set the conditions' do
+            pending do
+              @return.conditions.should be_nil
+            end
           end
 
           it 'should set the links' do
@@ -1629,9 +1617,7 @@ describe DataMapper::Query do
           it { should_not equal(@other) }
 
           it 'should put each query into a subquery and AND them together, and negate the other query' do
-            pending_if 'TODO: Fix once table aliasing works', @do_adapter do
-              subject.conditions.should == @expected
-            end
+            subject.conditions.should == @expected
           end
         end
 
@@ -1657,9 +1643,7 @@ describe DataMapper::Query do
           it { should_not equal(@other) }
 
           it 'should put each query into a subquery and AND them together, and negate the other query' do
-            pending_if 'TODO: Fix once table aliasing works', @do_adapter do
-              subject.conditions.should == @expected
-            end
+            subject.conditions.should == @expected
           end
         end
 
@@ -2130,9 +2114,7 @@ describe DataMapper::Query do
           it { should_not equal(@other) }
 
           it 'should put each query into a subquery and AND them together' do
-            pending_if 'TODO: Fix once table aliasing works', @do_adapter do
-              subject.conditions.should == @expected
-            end
+            subject.conditions.should == @expected
           end
         end
 
@@ -2156,9 +2138,7 @@ describe DataMapper::Query do
           it { should_not equal(@other) }
 
           it 'should put each query into a subquery and AND them together' do
-            pending_if 'TODO: Fix once table aliasing works', @do_adapter do
-              subject.conditions.should == @expected
-            end
+            subject.conditions.should == @expected
           end
         end
 
@@ -3265,9 +3245,7 @@ describe DataMapper::Query do
           it { should_not equal(@other) }
 
           it 'should put each query into a subquery and OR them together' do
-            pending_if 'TODO: Fix once table aliasing works', @do_adapter do
-              subject.conditions.should == @expected
-            end
+            subject.conditions.should == @expected
           end
         end
 
@@ -3291,9 +3269,7 @@ describe DataMapper::Query do
           it { should_not equal(@other) }
 
           it 'should put each query into a subquery and OR them together' do
-            pending_if 'TODO: Fix once table aliasing works', @do_adapter do
-              subject.conditions.should == @expected
-            end
+            subject.conditions.should == @expected
           end
         end
 
@@ -3742,16 +3718,10 @@ describe DataMapper::Query do
 
         it { @return.should be_kind_of(DataMapper::Query) }
 
-        it 'should set the conditions' do
-          @return.conditions.should ==
-            DataMapper::Query::Conditions::Operation.new(
-              :and,
-              DataMapper::Query::Conditions::Comparison.new(
-                :eql,
-                @model.grandparents.name,
-                'Dan Kubb'
-              )
-            )
+        it 'should not set the conditions' do
+          pending do
+            @return.conditions.should be_nil
+          end
         end
 
         it 'should set the links' do
