@@ -1,8 +1,13 @@
 # TODO: add Model#create!, Model#update, Model#update!, Model#destroy and Model#destroy!
 
+# TODO: DRY up raise_on_save_failure with attr_accessor_with_default
+# once AS branch is merged in
+
 module DataMapper
   module Model
     extend Chainable
+
+    include Enumerable
 
     # Creates a new Model class with default_storage_name +storage_name+
     #
@@ -30,7 +35,7 @@ module DataMapper
         warn "Passing in +storage_name+ to #{name}.new is deprecated (#{caller[0]})"
         model.class_eval <<-RUBY, __FILE__, __LINE__ + 1
           def self.default_storage_name
-            #{Extlib::Inflection.classify(storage_name).inspect}.freeze
+            #{DataMapper::Inflector.classify(storage_name).inspect}.freeze
           end
         RUBY
       end
@@ -70,7 +75,71 @@ module DataMapper
     #   Set containing the descendant classes
     #
     # @api semipublic
-    attr_reader :descendants
+    def descendants
+      @descendants ||= DescendantSet.new([ self ])
+    end
+
+    # Return if Resource#save should raise an exception on save failures (globally)
+    #
+    # This is false by default.
+    #
+    #   DataMapper::Model.raise_on_save_failure  # => false
+    #
+    # @return [Boolean]
+    #   true if a failure in Resource#save should raise an exception
+    #
+    # @api public
+    def self.raise_on_save_failure
+      if defined?(@raise_on_save_failure)
+        @raise_on_save_failure
+      else
+        false
+      end
+    end
+
+    # Specify if Resource#save should raise an exception on save failures (globally)
+    #
+    # @param [Boolean]
+    #   a boolean that if true will cause Resource#save to raise an exception
+    #
+    # @return [Boolean]
+    #   true if a failure in Resource#save should raise an exception
+    #
+    # @api public
+    def self.raise_on_save_failure=(raise_on_save_failure)
+      @raise_on_save_failure = raise_on_save_failure
+    end
+
+    # Return if Resource#save should raise an exception on save failures (per-model)
+    #
+    # This delegates to DataMapper::Model.raise_on_save_failure by default.
+    #
+    #   User.raise_on_save_failure  # => false
+    #
+    # @return [Boolean]
+    #   true if a failure in Resource#save should raise an exception
+    #
+    # @api public
+    def raise_on_save_failure
+      if defined?(@raise_on_save_failure)
+        @raise_on_save_failure
+      else
+        DataMapper::Model.raise_on_save_failure
+      end
+    end
+
+    # Specify if Resource#save should raise an exception on save failures (per-model)
+    #
+    # @param [Boolean]
+    #   a boolean that if true will cause Resource#save to raise an exception
+    #
+    # @return [Boolean]
+    #   true if a failure in Resource#save should raise an exception
+    #
+    # @api public
+    def raise_on_save_failure=(raise_on_save_failure)
+      @raise_on_save_failure = raise_on_save_failure
+    end
 
     # Appends a module for inclusion into the model class after Resource.
     #
@@ -89,6 +158,7 @@ module DataMapper
 
       # Add the inclusion to existing descendants
       descendants.each do |model|
+        next if equal?(model)
         inclusions.each { |inclusion| model.send :include, inclusion }
       end
 
@@ -120,6 +190,7 @@ module DataMapper
 
       # Add the extension to existing descendants
       descendants.each do |model|
+        next if equal?(model)
         extensions.each { |extension| model.extend(extension) }
       end
 
@@ -136,40 +207,29 @@ module DataMapper
     end
 
     # @api private
-    def self.extended(model)
-      descendants = self.descendants
+    def self.extended(descendant)
+      descendants << descendant
 
-      descendants << model
+      descendant.instance_variable_set(:@valid,         false)
+      descendant.instance_variable_set(:@base_model,    descendant)
+      descendant.instance_variable_set(:@storage_names, {})
+      descendant.instance_variable_set(:@default_order, {})
 
-      model.instance_variable_set(:@valid,         false)
-      model.instance_variable_set(:@base_model,    model)
-      model.instance_variable_set(:@storage_names, {})
-      model.instance_variable_set(:@default_order, {})
-      model.instance_variable_set(:@descendants,   descendants.class.new(model, descendants))
+      descendant.extend(Chainable)
 
-      extra_extensions.each { |mod| model.extend(mod)         }
-      extra_inclusions.each { |mod| model.send(:include, mod) }
+      extra_extensions.each { |mod| descendant.extend(mod)         }
+      extra_inclusions.each { |mod| descendant.send(:include, mod) }
     end
 
     # @api private
     chainable do
-      def inherited(model)
-        descendants = self.descendants
+      def inherited(descendant)
+        descendants << descendant
 
-        descendants << model
-
-        model.instance_variable_set(:@valid,         false)
-        model.instance_variable_set(:@base_model,    base_model)
-        model.instance_variable_set(:@storage_names, @storage_names.dup)
-        model.instance_variable_set(:@default_order, @default_order.dup)
-        model.instance_variable_set(:@descendants,   descendants.class.new(model, descendants))
-
-        # TODO: move this into dm-validations
-        if respond_to?(:validators)
-          validators.contexts.each do |context, validators|
-            model.validators.context(context).concat(validators)
-          end
-        end
+        descendant.instance_variable_set(:@valid,         false)
+        descendant.instance_variable_set(:@base_model,    base_model)
+        descendant.instance_variable_set(:@storage_names, @storage_names.dup)
+        descendant.instance_variable_set(:@default_order, @default_order.dup)
       end
     end
 
@@ -188,7 +248,7 @@ module DataMapper
     # the names of the storage receptacles for this resource across all repositories
     #
     # @return [Hash(Symbol => String)]
-    #   All available names of storage recepticles
+    #   All available names of storage receptacles
     #
     # @api public
     def storage_names
@@ -245,16 +305,22 @@ module DataMapper
       all.at(*args)
     end
 
+    def fetch(*args, &block)
+      all.fetch(*args, &block)
+    end
+
+    def values_at(*args)
+      all.values_at(*args)
+    end
+
     def reverse
       all.reverse
     end
 
-    # TODO: spec this
-    def entries
-      all.entries
+    def each(&block)
+      all.each(&block)
+      self
     end
-
-    alias to_a entries
 
     # Find a set of records matching an optional set of conditions. Additionally,
     # specify the order that the records are return.
@@ -271,10 +337,8 @@ module DataMapper
     # @see Collection
     #
     # @api public
-    def all(query = nil)
-      # TODO: update this not to accept a nil value, and instead either
-      # accept a Hash/Query and nothing else
-      if query.nil? || (query.kind_of?(Hash) && query.empty?)
+    def all(query = Undefined)
+      if query.equal?(Undefined) || (query.kind_of?(Hash) && query.empty?)
         # TODO: after adding Enumerable methods to Model, try to return self here
         new_collection(self.query.dup)
       else
@@ -384,22 +448,6 @@ module DataMapper
       first(conditions) || create(conditions.merge(attributes))
     end
 
-    # Initializes an instance of Resource with the given attributes
-    #
-    # @param [Hash(Symbol => Object)] attributes
-    #   hash of attributes to set
-    #
-    # @return [Resource]
-    #   the newly initialized Resource instance
-    #
-    # @api public
-    chainable do
-      def new(*args, &block)
-        assert_valid
-        super
-      end
-    end
-
     # Create a Resource
     #
     # @param [Hash(Symbol => Object)] attributes
@@ -410,7 +458,7 @@ module DataMapper
     #
     # @api public
     def create(attributes = {})
-      _create(true, attributes)
+      _create(attributes)
     end
 
     # Create a Resource, bypassing hooks
@@ -423,7 +471,57 @@ module DataMapper
     #
     # @api public
     def create!(attributes = {})
-      _create(false, attributes)
+      _create(attributes, false)
+    end
+
+    # Update every Resource
+    #
+    #   Person.update(:allow_beer => true)
+    #
+    # @param [Hash] attributes
+    #   attributes to update with
+    #
+    # @return [Boolean]
+    #   true if the resources were successfully updated
+    #
+    # @api public
+    def update(attributes)
+      all.update(attributes)
+    end
+
+    # Update every Resource, bypassing validations
+    #
+    #   Person.update!(:allow_beer => true)
+    #
+    # @param [Hash] attributes
+    #   attributes to update with
+    #
+    # @return [Boolean]
+    #   true if the resources were successfully updated
+    #
+    # @api public
+    def update!(attributes)
+      all.update!(attributes)
+    end
+
+    # Remove all Resources from the repository
+    #
+    # @return [Boolean]
+    #   true if the resources were successfully destroyed
+    #
+    # @api public
+    def destroy
+      all.destroy
+    end
+
+    # Remove all Resources from the repository, bypassing validation
+    #
+    # @return [Boolean]
+    #   true if the resources were successfully destroyed
+    #
+    # @api public
+    def destroy!
+      all.destroy!
     end
 
     # Copy a set of records from one repository to another.
@@ -452,7 +550,7 @@ module DataMapper
 
         all(query.merge(:repository => source_repository_name)).each do |resource|
           new_resource = new
-          query[:fields].each { |property| property.set(new_resource, property.get(resource)) }
+          query[:fields].each { |property| new_resource.__send__("#{property.name}=", property.get(resource)) }
           resources << new_resource if new_resource.save
         end
 
@@ -490,7 +588,7 @@ module DataMapper
             record = record.dup
             field_map.each { |property, field| record[property] = record.delete(field) if record.key?(field) }
 
-            model     = discriminator && record[discriminator] || self
+            model     = discriminator && discriminator.load(record[discriminator]) || self
             model_key = model.key(repository_name)
 
             resource = if model_key.valid?(key_values = record.values_at(*model_key))
@@ -507,9 +605,7 @@ module DataMapper
 
               # TODO: typecasting should happen inside the Adapter
               # and all values should come back as expected objects
-              if property.custom?
-                value = property.type.load(value, property)
-              end
+              value = property.load(value)
 
               property.set!(resource, value)
             end
@@ -533,14 +629,15 @@ module DataMapper
         end
 
         resource.instance_variable_set(:@_repository, repository)
-        resource.instance_variable_set(:@_saved,      true)
 
         if identity_map
+          resource.persisted_state = Resource::State::Clean.new(resource) unless resource.persisted_state?
+
           # defer setting the IdentityMap so second level caches can
           # record the state of the resource after loaded
           identity_map[key_values] = resource
         else
-          resource.instance_variable_set(:@_readonly, true)
+          resource.persisted_state = Resource::State::Immutable.new(resource)
         end
 
         resource
@@ -609,22 +706,12 @@ module DataMapper
       [ repository ].to_set + @properties.keys.map { |repository_name| DataMapper.repository(repository_name) }
     end
 
-    # @api private
-    def model_method_defined?(method)
-      model_methods.include?(method.to_s)
-    end
-
-    # @api private
-    def resource_method_defined?(method)
-      resource_methods.include?(method.to_s)
-    end
-
     private
 
     # @api private
-    def _create(safe, attributes)
+    def _create(attributes, execute_hooks = true)
       resource = new(attributes)
-      resource.__send__(safe ? :save : :save!)
+      resource.__send__(execute_hooks ? :save : :save!)
       resource
     end
 
@@ -635,8 +722,6 @@ module DataMapper
         self
       elsif name == :Resource
         Resource
-      elsif Types.const_defined?(name)
-        Types.const_get(name)
       else
         super
       end
@@ -681,14 +766,15 @@ module DataMapper
         if self.query.repository == repository
           query
         else
-          Query.new(repository, self, query.options)
+          repository.new_query(self, query.options)
         end
       end
     end
 
     # @api private
-    def assert_valid # :nodoc:
-      return if @valid
+    # TODO: Remove this once appropriate warnings can be added.
+    def assert_valid(force = false) # :nodoc:
+      return if @valid && !force
       @valid = true
 
       name            = self.name
@@ -704,35 +790,13 @@ module DataMapper
       end
 
       # initialize join models and target keys
-      @relationships.each_value do |relationships|
-        relationships.each_value do |relationship|
+      @relationships.values.each do |relationships|
+        relationships.values.each do |relationship|
           relationship.child_key
           relationship.through if relationship.respond_to?(:through)
           relationship.via     if relationship.respond_to?(:via)
         end
       end
-    end
-
-    # @api private
-    def model_methods
-      @model_methods ||= ancestor_instance_methods { |mod| mod.meta_class }
-    end
-
-    # @api private
-    def resource_methods
-      @resource_methods ||= ancestor_instance_methods { |mod| mod }
-    end
-
-    # @api private
-    def ancestor_instance_methods
-      methods = Set.new
-
-      ancestors.each do |mod|
-        next unless mod <= DataMapper::Resource
-        methods.merge(yield(mod).instance_methods(false).map { |method| method.to_s })
-      end
-
-      methods
     end
 
     # Raises an exception if #get receives the wrong number of arguments

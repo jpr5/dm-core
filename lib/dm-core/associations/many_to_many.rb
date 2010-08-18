@@ -162,9 +162,9 @@ module DataMapper
             namespace.const_get(name)
           else
             model = Model.new do
-              # all properties added to the anonymous through model are keys by default
+              # all properties added to the anonymous through model are keys
               def property(name, type, options = {})
-                options[:key] = true unless options.key?(:key)
+                options[:key] = true
                 options.delete(:index)
                 super
               end
@@ -196,7 +196,7 @@ module DataMapper
         def through_relationship_name
           if anonymous_through_model?
             namespace = through_model_namespace_name.first
-            relationship_name = Extlib::Inflection.underscore(through_model.name.sub(/\A#{namespace.name}::/, '')).tr('/', '_')
+            relationship_name = DataMapper::Inflector.underscore(through_model.name.sub(/\A#{namespace.name}::/, '')).tr('/', '_')
             relationship_name.pluralize.to_sym
           else
             options[:through]
@@ -302,20 +302,6 @@ module DataMapper
           )
         end
 
-        # Loads association targets and sets resulting value on
-        # given source resource
-        #
-        # @param [Resource] source
-        #   the source resource for the association
-        #
-        # @return [undefined]
-        #
-        # @api private
-        def lazy_load(source)
-          # FIXME: delegate to super once SEL is enabled
-          set!(source, collection_for(source))
-        end
-
         # Returns collection class used by this type of
         # relationship
         #
@@ -374,7 +360,10 @@ module DataMapper
             return false
           end
 
-          each { |resource| resource.reset }
+          each do |resource|
+            resource.persisted_state = Resource::State::Immutable.new(resource)
+          end
+
           clear
 
           true
@@ -391,7 +380,7 @@ module DataMapper
           source  = self.source
 
           @intermediaries ||= if through.loaded?(source)
-            through.get!(source)
+            through.get_collection(source)
           else
             reset_intermediaries
           end
@@ -422,27 +411,27 @@ module DataMapper
         private
 
         # @api private
-        def _create(safe, attributes)
+        def _create(attributes, execute_hooks = true)
           via = self.via
           if via.respond_to?(:resource_for)
             resource = super
-            if create_intermediary(safe, resource)
+            if create_intermediary(execute_hooks, resource)
               resource
             end
           else
-            if intermediary = create_intermediary(safe)
-              super(safe, attributes.merge(via.inverse => intermediary))
+            if intermediary = create_intermediary(execute_hooks)
+              super(attributes.merge(via.inverse => intermediary), execute_hooks)
             end
           end
         end
 
         # @api private
-        def _save(safe)
+        def _save(execute_hooks = true)
           via = self.via
 
           if @removed.any?
             # delete only intermediaries linked to the removed targets
-            return false unless intermediaries.all(via => @removed).send(safe ? :destroy : :destroy!)
+            return false unless intermediaries.all(via => @removed).send(execute_hooks ? :destroy : :destroy!)
 
             # reset the intermediaries so that it reflects the current state of the datastore
             reset_intermediaries
@@ -452,9 +441,9 @@ module DataMapper
 
           if via.respond_to?(:resource_for)
             super
-            loaded_entries.all? { |resource| create_intermediary(safe, resource) }
+            loaded_entries.all? { |resource| create_intermediary(execute_hooks, resource) }
           else
-            if intermediary = create_intermediary(safe)
+            if loaded_entries.any? && (intermediary = create_intermediary(execute_hooks))
               inverse = via.inverse
               loaded_entries.each { |resource| inverse.set(resource, intermediary) }
             end
@@ -464,14 +453,14 @@ module DataMapper
         end
 
         # @api private
-        def create_intermediary(safe, resource = nil)
+        def create_intermediary(execute_hooks, resource = nil)
           intermediary_for = self.intermediary_for
 
           intermediary_resource = intermediary_for[resource]
           return intermediary_resource if intermediary_resource
 
           intermediaries = self.intermediaries
-          method         = safe ? :save : :save!
+          method         = execute_hooks ? :save : :save!
 
           return unless intermediaries.send(method)
 
@@ -490,7 +479,7 @@ module DataMapper
           through = self.through
           source  = self.source
 
-          through.set!(source, through.collection_for(source))
+          through.set_collection(source, through.collection_for(source))
         end
 
         # @api private

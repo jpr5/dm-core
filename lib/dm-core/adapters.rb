@@ -1,7 +1,7 @@
 module DataMapper
   module Adapters
     extend Chainable
-    extend Extlib::Assertions
+    extend DataMapper::Assertions
 
     # Set up an adapter for a storage engine
     #
@@ -10,7 +10,35 @@ module DataMapper
     # @api private
     def self.new(repository_name, options)
       options = normalize_options(options)
-      adapter_class(options[:adapter]).new(repository_name, options)
+      adapter_class(options.fetch(:adapter)).new(repository_name, options)
+    end
+
+    # The path used to require the in memory adapter
+    #
+    # Set this if you want to register your own adapter
+    # to be used when you specify an 'in_memory' connection
+    # during
+    #
+    # @see DataMapper.setup
+    #
+    # @param [String] path
+    #   the path used to require the desired in memory adapter
+    #
+    # @api semipublic
+    def self.in_memory_adapter_path=(path)
+      @in_memory_adapter_path = path
+    end
+
+    # The path used to require the in memory adapter
+    #
+    # @see DataMapper.setup
+    #
+    # @return [String]
+    #   the path used to require the desired in memory adapter
+    #
+    # @api semipublic
+    def self.in_memory_adapter_path
+      @in_memory_adapter_path ||= 'dm-core/adapters/in_memory_adapter'
     end
 
     class << self
@@ -65,11 +93,11 @@ module DataMapper
 
         # Extract the name/value pairs from the query portion of the
         # connection uri, and set them as options directly.
-        if options[:query]
+        if options.fetch(:query)
           options.update(uri.query_values)
         end
 
-        options[:adapter] = options[:scheme]
+        options[:adapter] = options.fetch(:scheme)
 
         options
       end
@@ -89,6 +117,9 @@ module DataMapper
 
       # Return the adapter class constant
       #
+      # @example
+      #   DataMapper::Adapters.send(:adapter_class, 'mysql') # => DataMapper::Adapters::MysqlAdapter
+      #
       # @param [Symbol] name
       #   the name of the adapter
       #
@@ -97,9 +128,26 @@ module DataMapper
       #
       # @api private
       def adapter_class(name)
-        class_name = (Extlib::Inflection.camelize(name) << 'Adapter').to_sym
-        load_adapter(name) unless const_defined?(class_name)
+        adapter_name = normalize_adapter_name(name)
+        class_name = (DataMapper::Inflector.camelize(adapter_name) << 'Adapter').to_sym
+        load_adapter(adapter_name) unless const_defined?(class_name)
         const_get(class_name)
+      end
+
+      # Return the name of the adapter
+      #
+      # @example
+      #   DataMapper::Adapters.adapter_name('MysqlAdapter') # => 'mysql'
+      #
+      # @param [String] const_name
+      #   the adapter constant name
+      #
+      # @return [String]
+      #   the name of the adapter
+      #
+      # @api semipublic
+      def adapter_name(const_name)
+        const_name.to_s.chomp('Adapter').downcase
       end
 
       # Require the adapter library
@@ -112,17 +160,57 @@ module DataMapper
       #
       # @api private
       def load_adapter(name)
-        assert_kind_of 'name', name, String, Symbol
-
-        lib  = "#{name}_adapter"
-        file = DataMapper.root / 'lib' / 'dm-core' / 'adapters' / "#{lib}.rb"
-
-        if file.file?
-          require file
-        else
-          require lib
+        require "dm-#{name}-adapter"
+      rescue LoadError => original_error
+        begin
+          require in_memory_adapter?(name) ? in_memory_adapter_path : legacy_path(name)
+        rescue LoadError
+          raise original_error
         end
       end
+
+      # Returns wether or not the given adapter name is considered an in memory adapter
+      #
+      # @param [String, Symbol] name
+      #   the name of the adapter
+      #
+      # @return [Boolean]
+      #   true if the adapter is considered to be an in memory adapter
+      #
+      # @api private
+      def in_memory_adapter?(name)
+        name.to_s == 'in_memory'
+      end
+
+      # Returns the fallback filename that would be used to require the named adapter
+      #
+      # The fallback format is "#{name}_adapter" and will be phased out in favor of
+      # the properly 'namespaced' "dm-#{name}-adapter" format.
+      #
+      # @param [String, Symbol] name
+      #   the name of the adapter to require
+      #
+      # @return [String]
+      #   the filename that gets required for the adapter identified by name
+      #
+      # @api private
+      def legacy_path(name)
+        "#{name}_adapter"
+      end
+
+      # Adjust the adapter name to match the name used in the gem providing the adapter
+      #
+      # @param [String, Symbol] name
+      #   the name of the adapter
+      #
+      # @return [String]
+      #   the normalized adapter name
+      #
+      # @api private
+      def normalize_adapter_name(name)
+        (original = name.to_s) == 'sqlite3' ? 'sqlite' : original
+      end
+
     end
 
     extendable do

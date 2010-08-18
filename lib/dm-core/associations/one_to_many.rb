@@ -43,8 +43,8 @@ module DataMapper
           collection.relationship = self
           collection.source       = source
 
-          # make the collection empty if the source is not saved
-          collection.replace([]) unless source.saved?
+          # make the collection empty if the source is new
+          collection.replace([]) if source.new?
 
           collection
         end
@@ -53,13 +53,15 @@ module DataMapper
         # (ex.: author)
         #
         # @api semipublic
-        def get(source, other_query = nil)
-          assert_kind_of 'source', source, source_model
+        def get(source, query = nil)
+          lazy_load(source)
+          collection = get_collection(source)
+          query ? collection.all(query) : collection
+        end
 
-          lazy_load(source) unless loaded?(source)
-
-          collection = get!(source)
-          other_query.nil? ? collection : collection.all(other_query)
+        # @api private
+        def get_collection(source)
+          get!(source)
         end
 
         # Sets value of association targets (ex.: paragraphs) for given source resource
@@ -67,21 +69,13 @@ module DataMapper
         #
         # @api semipublic
         def set(source, targets)
-          assert_kind_of 'source',  source,  source_model
-          assert_kind_of 'targets', targets, Array
-
-          lazy_load(source) unless loaded?(source)
-
+          lazy_load(source)
           get!(source).replace(targets)
         end
 
-        private
-
-        # @api semipublic
-        def initialize(name, target_model, source_model, options = {})
-          target_model ||= Extlib::Inflection.camelize(name.to_s.singular)
-          options        = { :min => 0, :max => source_model.n }.update(options)
-          super
+        # @api private
+        def set_collection(source, target)
+          set!(source, target)
         end
 
         # Loads association targets and sets resulting value on
@@ -94,6 +88,8 @@ module DataMapper
         #
         # @api private
         def lazy_load(source)
+          return if loaded?(source)
+
           # SEL: load all related resources in the source collection
           collection = source.collection
           if source.saved? && collection.size > 1
@@ -103,6 +99,20 @@ module DataMapper
           unless loaded?(source)
             set!(source, collection_for(source))
           end
+        end
+
+        # @api semipublic
+        def default_for(source)
+          collection_for(source).replace(Array(super))
+        end
+
+        private
+
+        # @api semipublic
+        def initialize(name, target_model, source_model, options = {})
+          target_model ||= DataMapper::Inflector.camelize(name.to_s.singularize)
+          options        = { :min => 0, :max => source_model.n }.update(options)
+          super
         end
 
         # Sets the association targets in the resource
@@ -140,7 +150,7 @@ module DataMapper
         #
         # @api private
         def inverse_name
-          super || Extlib::Inflection.underscore(Extlib::Inflection.demodulize(source_model.name)).to_sym
+          super || DataMapper::Inflector.underscore(DataMapper::Inflector.demodulize(source_model.name)).to_sym
         end
 
         # @api private
@@ -257,11 +267,11 @@ module DataMapper
         end
 
         # @api private
-        def _save(safe)
+        def _save(execute_hooks = true)
           assert_source_saved 'The source must be saved before saving the collection'
 
           # update removed resources to not reference the source
-          @removed.all? { |resource| resource.destroyed? || resource.__send__(safe ? :save : :save!) } && super
+          @removed.all? { |resource| resource.destroyed? || resource.__send__(execute_hooks ? :save : :save!) } && super
         end
 
         # @api private

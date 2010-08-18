@@ -1,6 +1,9 @@
+# TODO: DRY up raise_on_save_failure with attr_accessor_with_default
+# once AS branch is merged in
+
 module DataMapper
   module Resource
-    include Extlib::Assertions
+    include DataMapper::Assertions
     extend Chainable
     extend Deprecate
 
@@ -24,20 +27,51 @@ module DataMapper
       Model.descendants
     end
 
+    # Return if Resource#save should raise an exception on save failures (per-resource)
+    #
+    # This delegates to model.raise_on_save_failure by default.
+    #
+    #   user.raise_on_save_failure  # => false
+    #
+    # @return [Boolean]
+    #   true if a failure in Resource#save should raise an exception
+    #
+    # @api public
+    def raise_on_save_failure
+      if defined?(@raise_on_save_failure)
+        @raise_on_save_failure
+      else
+        model.raise_on_save_failure
+      end
+    end
+
+    # Specify if Resource#save should raise an exception on save failures (per-resource)
+    #
+    # @param [Boolean]
+    #   a boolean that if true will cause Resource#save to raise an exception
+    #
+    # @return [Boolean]
+    #   true if a failure in Resource#save should raise an exception
+    #
+    # @api public
+    def raise_on_save_failure=(raise_on_save_failure)
+      @raise_on_save_failure = raise_on_save_failure
+    end
+
     # Deprecated API for updating attributes and saving Resource
     #
     # @see #update
     #
     # @deprecated
     def update_attributes(attributes = {}, *allowed)
-      model  = self.model
-      caller = caller[0]
+      model      = self.model
+      call_stack = caller[0]
 
-      warn "#{model}#update_attributes is deprecated, use #{model}#update instead (#{caller})"
+      warn "#{model}#update_attributes is deprecated, use #{model}#update instead (#{call_stack})"
 
       if allowed.any?
         warn "specifying allowed in #{model}#update_attributes is deprecated, " \
-          "use Hash#only to filter the attributes in the caller (#{caller})"
+          "use Hash#only to filter the attributes in the caller (#{call_stack})"
         attributes = attributes.only(*allowed)
       end
 
@@ -54,6 +88,38 @@ module DataMapper
 
     # @api public
     alias_method :model, :class
+
+    # Get the persisted state for the resource
+    #
+    # @return [Resource::State]
+    #   the current persisted state for the resource
+    #
+    # @api private
+    def persisted_state
+      @_state ||= Resource::State::Transient.new(self)
+    end
+
+    # Set the persisted state for the resource
+    #
+    # @param [Resource::State]
+    #   the new persisted state for the resource
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def persisted_state=(state)
+      @_state = state
+    end
+
+    # Test if the persisted state is set
+    #
+    # @return [Boolean]
+    #   true if the persisted state is set
+    #
+    # @api private
+    def persisted_state?
+      defined?(@_state) ? true : false
+    end
 
     # Repository this resource belongs to in the context of this collection
     # or of the resource's class.
@@ -98,7 +164,7 @@ module DataMapper
     #
     # @api public
     def new?
-      !saved?
+      persisted_state.kind_of?(State::Transient)
     end
 
     # Checks if this Resource instance is saved
@@ -108,7 +174,7 @@ module DataMapper
     #
     # @api public
     def saved?
-      @_saved == true
+      persisted_state.kind_of?(State::Persisted)
     end
 
     # Checks if this Resource instance is destroyed
@@ -118,7 +184,7 @@ module DataMapper
     #
     # @api public
     def destroyed?
-      @_destroyed == true
+      readonly? && !key.nil?
     end
 
     # Checks if the resource has no changes to save
@@ -128,7 +194,7 @@ module DataMapper
     #
     # @api public
     def clean?
-      !dirty?
+      persisted_state.kind_of?(State::Clean) || persisted_state.kind_of?(State::Immutable)
     end
 
     # Checks if the resource has unsaved changes
@@ -150,7 +216,7 @@ module DataMapper
     #
     # @api public
     def readonly?
-      @_readonly == true
+      persisted_state.kind_of?(State::Immutable)
     end
 
     # Returns the value of the attribute.
@@ -185,7 +251,7 @@ module DataMapper
     #
     # @api public
     def attribute_get(name)
-      properties[name].get(self)
+      persisted_state.get(properties[name])
     end
 
     alias [] attribute_get
@@ -222,13 +288,11 @@ module DataMapper
     # @param [Object] value
     #   value to store
     #
-    # @return [Object]
-    #   the value stored at that given attribute, nil if none,
-    #   and default if necessary
+    # @return [undefined]
     #
     # @api public
     def attribute_set(name, value)
-      properties[name].set(self, value)
+      self.persisted_state = persisted_state.set(properties[name], value)
     end
 
     alias []= attribute_set
@@ -283,7 +347,7 @@ module DataMapper
               raise ArgumentError, "The attribute '#{name}' is not accessible in #{model}"
             end
           when Associations::Relationship, Property
-            name.set(self, value)
+            self.persisted_state = persisted_state.set(name, value)
         end
       end
     end
@@ -307,6 +371,8 @@ module DataMapper
         clear_subjects
       end
 
+      self.persisted_state = persisted_state.rollback
+
       self
     end
 
@@ -319,7 +385,7 @@ module DataMapper
     #   true if resource and storage state match
     #
     # @api public
-    def update(attributes = {})
+    def update(attributes)
       assert_update_clean_only(:update)
       self.attributes = attributes
       save
@@ -334,7 +400,7 @@ module DataMapper
     #   true if resource and storage state match
     #
     # @api public
-    def update!(attributes = {})
+    def update!(attributes)
       assert_update_clean_only(:update!)
       self.attributes = attributes
       save!
@@ -348,7 +414,9 @@ module DataMapper
     # @api public
     def save
       assert_not_destroyed(:save)
-      _save(true)
+      retval = _save
+      assert_save_successful(:save, retval)
+      retval
     end
 
     # Save the instance and loaded, dirty associations to the data-store, bypassing hooks
@@ -359,7 +427,9 @@ module DataMapper
     # @api public
     def save!
       assert_not_destroyed(:save!)
-      _save(false)
+      retval = _save(false)
+      assert_save_successful(:save!, retval)
+      retval
     end
 
     # Destroy the instance, remove it from the repository
@@ -369,7 +439,13 @@ module DataMapper
     #
     # @api public
     def destroy
-      destroy!
+      return true if destroyed?
+      catch :halt do
+        before_destroy_hook
+        _destroy
+        after_destroy_hook
+      end
+      destroyed?
     end
 
     # Destroy the instance, remove it from the repository, bypassing hooks
@@ -380,15 +456,8 @@ module DataMapper
     # @api public
     def destroy!
       return true if destroyed?
-
-      if saved?
-        repository.delete(collection_for_self)
-        reset
-        @_readonly  = true
-        @_destroyed = true
-      else
-        false
-      end
+      _destroy(false)
+      destroyed?
     end
 
     # Compares another Resource for equality
@@ -423,9 +492,7 @@ module DataMapper
     # @api public
     def ==(other)
       return true if equal?(other)
-      other.respond_to?(:repository) &&
-      other.respond_to?(:key)        &&
-      other.respond_to?(:clean?)     &&
+      return false unless other.kind_of?(Resource) && model.base_model.equal?(other.model.base_model)
       cmp?(other, :==)
     end
 
@@ -443,14 +510,13 @@ module DataMapper
     def <=>(other)
       model = self.model
       unless other.kind_of?(model.base_model)
-        raise ArgumentError, "Cannot compare a #{other.model} instance with a #{model} instance"
+        raise ArgumentError, "Cannot compare a #{other.class} instance with a #{model} instance"
       end
-      cmp = 0
       model.default_order(repository_name).each do |direction|
         cmp = direction.get(self) <=> direction.get(other)
-        break if cmp != 0
+        return cmp if cmp.nonzero?
       end
-      cmp
+      0
     end
 
     # Returns hash value of the object.
@@ -497,7 +563,11 @@ module DataMapper
     #
     # @api semipublic
     def original_attributes
-      @_original_attributes ||= {}
+      if persisted_state.respond_to?(:original_attributes)
+        persisted_state.original_attributes.dup.freeze
+      else
+        {}.freeze
+      end
     end
 
     # Checks if an attribute has been loaded from the repository
@@ -546,22 +616,11 @@ module DataMapper
       dirty_attributes = {}
 
       original_attributes.each_key do |property|
-        dirty_attributes[property] = property.value(property.get!(self))
+        next unless property.respond_to?(:value)
+        dirty_attributes[property] = property.dump(property.get!(self))
       end
 
       dirty_attributes
-    end
-
-    # Reset the Resource to a similar state as a new record:
-    # removes it from identity map and clears original property
-    # values (thus making all properties non dirty)
-    #
-    # @api private
-    def reset
-      @_saved = false
-      remove_from_identity_map
-      original_attributes.clear
-      self
     end
 
     # Returns the Collection the Resource is associated with
@@ -609,29 +668,81 @@ module DataMapper
     #
     # @api semipublic
     def query
-      Query.new(repository, model, :fields => fields, :conditions => conditions)
+      repository.new_query(model, :fields => fields, :conditions => conditions)
     end
 
     protected
 
-    # Method for hooking callbacks on resource creation
+    # Method for hooking callbacks before resource saving
     #
-    # @return [Boolean]
-    #   true if the create was successful, false if not
+    # @return [undefined]
     #
     # @api private
-    def create_hook
-      _create
+    def before_save_hook
+      execute_hooks_for(:before, :save)
     end
 
-    # Method for hooking callbacks on resource updates
+    # Method for hooking callbacks after resource saving
     #
-    # @return [Boolean]
-    #   true if the update was successful, false if not
+    # @return [undefined]
     #
     # @api private
-    def update_hook
-      _update
+    def after_save_hook
+      execute_hooks_for(:after, :save)
+    end
+
+    # Method for hooking callbacks before resource creation
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def before_create_hook
+      execute_hooks_for(:before, :create)
+    end
+
+    # Method for hooking callbacks after resource creation
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def after_create_hook
+      execute_hooks_for(:after, :create)
+    end
+
+    # Method for hooking callbacks before resource updating
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def before_update_hook
+      execute_hooks_for(:before, :update)
+    end
+
+    # Method for hooking callbacks after resource updating
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def after_update_hook
+      execute_hooks_for(:after, :update)
+    end
+
+    # Method for hooking callbacks before resource destruction
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def before_destroy_hook
+      execute_hooks_for(:before, :destroy)
+    end
+
+    # Method for hooking callbacks after resource destruction
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def after_destroy_hook
+      execute_hooks_for(:after, :destroy)
     end
 
     private
@@ -645,8 +756,17 @@ module DataMapper
     #   attribute values used in the new instance
     #
     # @api public
-    def initialize(attributes = {}, &block) # :nodoc:
-      self.attributes = attributes
+    def initialize(attributes = nil) # :nodoc:
+      self.attributes = attributes if attributes
+    end
+
+    # @api private
+    def initialize_copy(original)
+      instance_variables.each do |ivar|
+        instance_variable_set(ivar, instance_variable_get(ivar).try_dup)
+      end
+
+      self.persisted_state = persisted_state.class.new(self)
     end
 
     # Returns name of the repository this object
@@ -721,7 +841,6 @@ module DataMapper
     def reset_key
       properties.key.zip(key) do |property, value|
         property.set!(self, value)
-        original_attributes.delete(property)
       end
     end
 
@@ -736,7 +855,6 @@ module DataMapper
       (model_properties - model_properties.key | relationships.values).each do |subject|
         next unless subject.loaded?(self)
         remove_instance_variable(subject.instance_variable_name)
-        original_attributes.delete(subject)
       end
     end
 
@@ -763,6 +881,9 @@ module DataMapper
     # @api private
     def eager_load(properties)
       unless properties.empty? || key.nil? || collection.nil?
+        # set an initial value to prevent recursive lazy loads
+        properties.each { |property| property.set!(self, nil) }
+
         collection.reload(:fields => properties)
       end
 
@@ -794,7 +915,10 @@ module DataMapper
       parent_relationships = []
 
       relationships.each_value do |relationship|
-        next unless relationship.respond_to?(:resource_for) && relationship.loaded?(self) && relationship.get!(self)
+        next unless relationship.respond_to?(:resource_for)
+        set_default_value(relationship)
+        next unless relationship.loaded?(self) && relationship.get!(self)
+
         parent_relationships << relationship
       end
 
@@ -811,7 +935,10 @@ module DataMapper
       child_relationships = []
 
       relationships.each_value do |relationship|
-        next unless relationship.respond_to?(:collection_for) && relationship.loaded?(self) && relationship.get!(self)
+        next unless relationship.respond_to?(:collection_for)
+        set_default_value(relationship)
+        next unless relationship.loaded?(self)
+
         child_relationships << relationship
       end
 
@@ -823,93 +950,72 @@ module DataMapper
     end
 
     # @api private
-    def parent_resources
+    def parent_associations
       parent_relationships.map { |relationship| relationship.get!(self) }
     end
 
     # @api private
-    def child_collections
-      child_relationships.map { |relationship| relationship.get!(self) }
+    def child_associations
+      child_relationships.map { |relationship| relationship.get_collection(self) }
     end
 
-    # Creates the resource with default values
+    # Commit the persisted state
     #
-    # If resource is not dirty or a new (not yet saved),
-    # this method returns false
-    #
-    # On successful save identity map of the repository is
-    # updated
-    #
-    # Needs to be a protected method so that it is hookable
-    #
-    # The primary purpose of this method is to allow before :create
-    # hooks to fire at a point just before/after resource creation
-    #
-    # @return [Boolean]
-    #   true if the receiver was successfully created
+    # @return [undefined]
     #
     # @api private
-    def _create
-      # Can't create a resource that is not dirty and doesn't have serial keys
-      return false if new? && clean?
-
-      # set defaults for new resource
-      properties.each do |property|
-        unless property.serial? || property.loaded?(self)
-          property.set(self, property.default_for(self))
-        end
-      end
-
-      @_repository = repository
-      @_repository.create([ self ])
-
-      @_saved = true
-
-      original_attributes.clear
-
-      add_to_identity_map
-
-      true
+    def _persist
+      self.persisted_state = persisted_state.commit
     end
 
-    # Updates resource state
-    #
-    # The primary purpose of this method is to allow before :update
-    # hooks to fire at a point just before/after resource update whether
-    # it is the result of Resource#save, or using Resource#update
+    # This method executes the hooks before and after resource creation
     #
     # @return [Boolean]
-    #   true if the receiver was successfully created
+    #
+    # @see Resource#_create
     #
     # @api private
-    def _update
-      original_attributes = self.original_attributes
-
-      if original_attributes.empty?
-        true
-      elsif original_attributes.any? { |property, _value| !property.valid?(property.get!(self)) }
-        false
-      else
-        # remove from the identity map
-        remove_from_identity_map
-
-        repository.update(dirty_attributes, collection_for_self)
-
-        original_attributes.clear
-
-        # remove the cached key in case it is updated
-        remove_instance_variable(:@_key)
-
-        add_to_identity_map
-
-        true
+    def create_with_hooks
+      catch :halt do
+        before_save_hook
+        before_create_hook
+        _persist
+        after_create_hook
+        after_save_hook
       end
     end
 
+    # This method executes the hooks before and after resource updating
+    #
+    # @return [Boolean]
+    #
+    # @see Resource#_update
+    #
     # @api private
-    def _save(safe)
+    def update_with_hooks
+      catch :halt do
+        before_save_hook
+        before_update_hook
+        _persist
+        after_update_hook
+        after_save_hook
+      end
+    end
+
+    # Destroy the resource
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def _destroy(execute_hooks = true)
+      self.persisted_state = persisted_state.delete
+      _persist
+    end
+
+    # @api private
+    def _save(execute_hooks = true)
       run_once(true) do
-        save_parents(safe) && save_self(safe) && save_children(safe)
+        save_parents(execute_hooks) && save_self(execute_hooks) && save_children(execute_hooks)
       end
     end
 
@@ -919,13 +1025,16 @@ module DataMapper
     #   true if the resource was successfully saved
     #
     # @api semipublic
-    def save_self(safe = true)
-      new_resource = new?
-      if safe
-        new_resource ? create_hook : update_hook
+    def save_self(execute_hooks = true)
+      # short-circuit if the resource is not dirty
+      return saved? unless dirty_self?
+
+      if execute_hooks
+        new? ? create_with_hooks : update_with_hooks
       else
-        new_resource ? _create : _update
+        _persist
       end
+      clean?
     end
 
     # Saves the parent resources
@@ -934,15 +1043,15 @@ module DataMapper
     #   true if the parents were successfully saved
     #
     # @api private
-    def save_parents(safe)
+    def save_parents(execute_hooks)
       run_once(true) do
-        parent_relationships.all? do |relationship|
+        parent_relationships.map do |relationship|
           parent = relationship.get!(self)
 
-          if parent.__send__(:save_parents, safe) && parent.__send__(:save_self, safe)
+          if parent.__send__(:save_parents, execute_hooks) && parent.__send__(:save_self, execute_hooks)
             relationship.set(self, parent)  # set the FK values
           end
-        end
+        end.all?
       end
     end
 
@@ -952,10 +1061,10 @@ module DataMapper
     #   true if the children were successfully saved
     #
     # @api private
-    def save_children(safe)
-      child_collections.all? do |collection|
-        collection.send(safe ? :save : :save!)
-      end
+    def save_children(execute_hooks)
+      child_associations.map do |association|
+        association.__send__(execute_hooks ? :save : :save!)
+      end.all?
     end
 
     # Checks if the resource has unsaved changes
@@ -963,7 +1072,7 @@ module DataMapper
     # @return [Boolean]
     #  true if the resource has unsaged changes
     #
-    # @api private
+    # @api semipublic
     def dirty_self?
       if original_attributes.any?
         true
@@ -982,8 +1091,8 @@ module DataMapper
     # @api private
     def dirty_parents?
       run_once(false) do
-        parent_resources.any? do |parent|
-          parent.__send__(:dirty_self?) || parent.__send__(:dirty_parents?)
+        parent_associations.any? do |association|
+          association.__send__(:dirty_self?) || association.__send__(:dirty_parents?)
         end
       end
     end
@@ -998,7 +1107,7 @@ module DataMapper
     #
     # @api private
     def dirty_children?
-      child_collections.any? { |children| children.dirty? }
+      child_associations.any? { |association| association.dirty? }
     end
 
     # Return true if +other+'s is equivalent or equal to +self+'s
@@ -1013,17 +1122,38 @@ module DataMapper
     #
     # @api private
     def cmp?(other, operator)
-      return false unless key.send(operator, other.key)
-      return true if repository.send(operator, other.repository) && clean? && other.clean?
+      return false unless repository.send(operator, other.repository) &&
+                          key.send(operator, other.key)
 
-      # get all the loaded and non-loaded properties that are not keys,
-      # since the key comparison was performed earlier
-      loaded, not_loaded = properties.select { |property| !property.key? }.partition do |property|
-        property.loaded?(self) && property.loaded?(other)
+      if saved? && other.saved?
+        # if dirty attributes match then they are the same resource
+        dirty_attributes == other.dirty_attributes
+      else
+        # compare properties for unsaved resources
+        properties.all? do |property|
+          __send__(property.name).send(operator, other.__send__(property.name))
+        end
       end
+    end
 
-      # check all loaded properties, and then all unloaded properties
-      (loaded + not_loaded).all? { |property| property.get(self).send(operator, property.get(other)) }
+    # @api private
+    def set_default_value(subject)
+      return unless persisted_state.respond_to?(:set_default_value, true)
+      persisted_state.__send__(:set_default_value, subject)
+    end
+
+    # Execute all the queued up hooks for a given type and name
+    #
+    # @param [Symbol] type
+    #   the type of hook to execute (before or after)
+    # @param [Symbol] name
+    #   the name of the hook to execute
+    #
+    # @return [undefined]
+    #
+    # @api private
+    def execute_hooks_for(type, name)
+      model.hooks[name][type].each { |hook| hook.call(self) }
     end
 
     # Raises an exception if #update is performed on a dirty resource
@@ -1039,7 +1169,7 @@ module DataMapper
     # @api private
     def assert_update_clean_only(method)
       if dirty?
-        raise UpdateConflictError, "#{model}##{method} cannot be called on a dirty resource"
+        raise UpdateConflictError, "#{model}##{method} cannot be called on a #{new? ? 'new' : 'dirty'} resource"
       end
     end
 
@@ -1057,6 +1187,25 @@ module DataMapper
     def assert_not_destroyed(method)
       if destroyed?
         raise PersistenceError, "#{model}##{method} cannot be called on a destroyed resource"
+      end
+    end
+
+    # Raises an exception if #save returns false
+    #
+    # @param [Symbol] method
+    #   the name of the method to use in the exception
+    # @param [Boolean] save_result
+    #   the result of the #save call
+    #
+    # @return [undefined]
+    #
+    # @raise [SaveFailureError]
+    #   raise if the resource was not saved
+    #
+    # @api private
+    def assert_save_successful(method, save_retval)
+      if save_retval != true && raise_on_save_failure
+        raise SaveFailureError.new("#{model}##{method} returned #{save_retval.inspect}, #{model} was not saved", self)
       end
     end
 

@@ -6,9 +6,10 @@ module DataMapper
     # (1 to 1, 1 to n, n to m) implements a subclass of this class
     # with methods like get and set overridden.
     class Relationship
-      include Extlib::Assertions
+      include DataMapper::Assertions
+      include Subject
 
-      OPTIONS = [ :child_repository_name, :parent_repository_name, :child_key, :parent_key, :min, :max, :inverse, :reader_visibility, :writer_visibility ].to_set
+      OPTIONS = [ :child_repository_name, :parent_repository_name, :child_key, :parent_key, :min, :max, :inverse, :reader_visibility, :writer_visibility, :default ].to_set
 
       # Relationship name
       #
@@ -319,8 +320,6 @@ module DataMapper
       #
       # @api semipublic
       def loaded?(resource)
-        assert_kind_of 'resource', resource, source_model
-
         resource.instance_variable_defined?(instance_variable_name)
       end
 
@@ -449,6 +448,7 @@ module DataMapper
         @max                    = @options[:max]
         @reader_visibility      = @options.fetch(:reader_visibility, :public)
         @writer_visibility      = @options.fetch(:writer_visibility, :public)
+        @default                = @options.fetch(:default, nil)
 
         # TODO: normalize the @query to become :conditions => AndOperation
         #  - Property/Relationship/Path should be left alone

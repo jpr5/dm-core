@@ -4,7 +4,7 @@ module DataMapper
       # Relationship class with implementation specific
       # to n side of 1 to n association
       class Relationship < Associations::Relationship
-        OPTIONS = superclass::OPTIONS.dup << :required
+        OPTIONS = superclass::OPTIONS.dup << :required << :key
 
         # @api semipublic
         alias source_repository_name child_repository_name
@@ -24,6 +24,11 @@ module DataMapper
         # @api semipublic
         def required?
           @required
+        end
+
+        # @api semipublic
+        def key?
+          @key
         end
 
         # @api private
@@ -50,7 +55,7 @@ module DataMapper
             properties[property_name] || begin
               # create the property within the correct repository
               DataMapper.repository(repository_name) do
-                type = parent_property.send(parent_property.type == DataMapper::Types::Boolean ? :type : :primitive)
+                type = parent_property.send(parent_property.type == DataMapper::Property::Boolean ? :type : :primitive)
                 model.property(property_name, type, child_key_options(parent_property))
               end
             end
@@ -106,15 +111,15 @@ module DataMapper
         #   Query options
         #
         # @api semipublic
-        def get(source, other_query = nil)
-          assert_kind_of 'source', source, source_model
+        def get(source, query = nil)
+          lazy_load(source)
+          collection = get_collection(source)
+          collection.first(query) if collection
+        end
 
-          lazy_load(source) unless loaded?(source)
-
+        def get_collection(source)
           resource = get!(source)
-          if other_query.nil? || query_for(source, other_query).conditions.matches?(resource)
-            resource
-          end
+          resource.collection_for_self if resource
         end
 
         # Sets value of association target (ex.: author) for given source resource
@@ -128,17 +133,37 @@ module DataMapper
         #
         # @api semipublic
         def set(source, target)
-          target_model = self.target_model
+          target = typecast(target)
+          source_key.set(source, target_key.get(target))
+          set!(source, target)
+        end
 
-          assert_kind_of 'source', source, source_model
-          assert_kind_of 'target', target, target_model, Hash, NilClass
+        # @api semipublic
+        def default_for(source)
+          typecast(super)
+        end
 
-          if target.kind_of?(Hash)
-            target = target_model.new(target)
+        # Loads association target and sets resulting value on
+        # given source resource
+        #
+        # @param [Resource] source
+        #   the source resource for the association
+        #
+        # @return [undefined]
+        #
+        # @api private
+        def lazy_load(source)
+          return if loaded?(source) || !valid_source?(source)
+
+          # SEL: load all related resources in the source collection
+          collection = source.collection
+          if source.saved? && collection.size > 1
+            eager_load(collection)
           end
 
-          source_key.set(source, target.nil? ? [] : target_key.get(target))
-          set!(source, target)
+          unless loaded?(source)
+            set!(source, resource_for(source))
+          end
         end
 
         private
@@ -155,32 +180,10 @@ module DataMapper
           end
 
           @required      = options.fetch(:required, true)
-          target_model ||= Extlib::Inflection.camelize(name)
+          @key           = options.fetch(:key,      false)
+          target_model ||= DataMapper::Inflector.camelize(name)
           options        = { :min => @required ? 1 : 0, :max => 1 }.update(options)
           super
-        end
-
-        # Loads association target and sets resulting value on
-        # given source resource
-        #
-        # @param [Resource] source
-        #   the source resource for the association
-        #
-        # @return [undefined]
-        #
-        # @api private
-        def lazy_load(source)
-          return unless valid_source?(source)
-
-          # SEL: load all related resources in the source collection
-          collection = source.collection
-          if source.saved? && collection.size > 1
-            eager_load(collection)
-          end
-
-          unless loaded?(source)
-            set!(source, resource_for(source))
-          end
         end
 
         # Sets the association targets in the resource
@@ -199,6 +202,15 @@ module DataMapper
           set(source, targets.first)
         end
 
+        # @api private
+        def typecast(target)
+          if target.kind_of?(Hash)
+            target_model.new(target)
+          else
+            target
+          end
+        end
+
         # Returns the inverse relationship class
         #
         # @api private
@@ -210,18 +222,22 @@ module DataMapper
         #
         # @api private
         def inverse_name
-          super || Extlib::Inflection.underscore(Extlib::Inflection.demodulize(source_model.name)).pluralize.to_sym
+          super || DataMapper::Inflector.underscore(DataMapper::Inflector.demodulize(source_model.name)).pluralize.to_sym
         end
 
         # @api private
         def child_key_options(parent_property)
-          options = parent_property.options.only(:length, :precision, :scale).update(:index => name, :required => required?)
+          options = parent_property.options.only(:length, :precision, :scale).update(
+            :index    => name,
+            :required => required?,
+            :key      => key?
+          )
 
-          min = parent_property.min
-          max = parent_property.max
+          if parent_property.primitive == Integer
+            min = parent_property.min
+            max = parent_property.max
 
-          if parent_property.primitive == Integer && min && max
-            options.update(:min => min, :max => max)
+            options.update(:min => min, :max => max) if min && max
           end
 
           options

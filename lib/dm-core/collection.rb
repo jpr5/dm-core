@@ -65,9 +65,9 @@ module DataMapper
     # @return [self]
     #
     # @api public
-    def reload(other_query = nil)
+    def reload(other_query = Undefined)
       query = self.query
-      query = other_query.nil? ? query.dup : query.merge(other_query)
+      query = other_query.equal?(Undefined) ? query.dup : query.merge(other_query)
 
       # make sure the Identity Map contains all the existing resources
       identity_map = repository.identity_map(model)
@@ -214,10 +214,8 @@ module DataMapper
     #   Collection scoped by +query+
     #
     # @api public
-    def all(query = nil)
-      # TODO: update this not to accept a nil value, and instead either
-      # accept a Hash/Query and nothing else
-      if query.nil? || (query.kind_of?(Hash) && query.empty?)
+    def all(query = Undefined)
+      if query.equal?(Undefined) || (query.kind_of?(Hash) && query.empty?)
         dup
       else
         # TODO: if there is no order parameter, and the Collection is not loaded
@@ -352,8 +350,12 @@ module DataMapper
     def at(offset)
       if loaded? || partially_loaded?(offset)
         super
-      elsif offset >= 0
+      elsif offset == 0
+        first
+      elsif offset > 0
         first(:offset => offset)
+      elsif offset == -1
+        last
       else
         last(:offset => offset.abs - 1)
       end
@@ -787,7 +789,7 @@ module DataMapper
     #
     # @api public
     def create(attributes = {})
-      _create(true, attributes)
+      _create(attributes)
     end
 
     # Create a Resource in the Collection, bypassing hooks
@@ -800,7 +802,7 @@ module DataMapper
     #
     # @api public
     def create!(attributes = {})
-      _create(false, attributes)
+      _create(attributes, false)
     end
 
     # Update every Resource in the Collection
@@ -814,7 +816,7 @@ module DataMapper
     #   true if the resources were successfully updated
     #
     # @api public
-    def update(attributes = {})
+    def update(attributes)
       assert_update_clean_only(:update)
 
       dirty_attributes = model.new(attributes).dirty_attributes
@@ -832,7 +834,7 @@ module DataMapper
     #   true if the resources were successfully updated
     #
     # @api public
-    def update!(attributes = {})
+    def update!(attributes)
       assert_update_clean_only(:update!)
 
       model = self.model
@@ -866,7 +868,7 @@ module DataMapper
     #
     # @api public
     def save
-      _save(true)
+      _save
     end
 
     # Save every Resource in the Collection bypassing validation
@@ -915,7 +917,10 @@ module DataMapper
           return false
         end
 
-        each { |resource| resource.reset }
+        each do |resource|
+          resource.persisted_state = Resource::State::Immutable.new(resource)
+        end
+
         clear
       else
         mark_loaded
@@ -1192,8 +1197,8 @@ module DataMapper
 
     # Creates a resource in the collection
     #
-    # @param [Boolean] safe
-    #   Whether to use the safe or unsafe create
+    # @param [Boolean] execute_hooks
+    #   Whether to execute hooks or not
     # @param [Hash] attributes
     #   Attributes with which to create the new resource
     #
@@ -1201,8 +1206,8 @@ module DataMapper
     #   a saved Resource
     #
     # @api private
-    def _create(safe, attributes)
-      resource = repository.scope { model.send(safe ? :create : :create!, default_attributes.merge(attributes)) }
+    def _create(attributes, execute_hooks = true)
+      resource = repository.scope { model.send(execute_hooks ? :create : :create!, default_attributes.merge(attributes)) }
       self << resource if resource.saved?
       resource
     end
@@ -1220,18 +1225,18 @@ module DataMapper
 
     # Saves a collection
     #
-    # @param [Symbol] method
-    #   The name of the Resource method to save the collection with
+    # @param [Boolean] execute_hooks
+    #   Whether to execute hooks or not
     #
     # @return [Boolean]
     #   Returns true if collection was updated
     #
     # @api private
-    def _save(safe)
+    def _save(execute_hooks = true)
       loaded_entries = self.loaded_entries
       loaded_entries.each { |resource| set_default_attributes(resource) }
       @removed.clear
-      loaded_entries.all? { |resource| resource.__send__(safe ? :save : :save!) }
+      loaded_entries.all? { |resource| resource.__send__(execute_hooks ? :save : :save!) }
     end
 
     # Returns default values to initialize new Resources in the Collection
@@ -1434,9 +1439,9 @@ module DataMapper
     def method_missing(method, *args, &block)
       relationships = self.relationships
 
-      if model.model_method_defined?(method)
+      if model.respond_to?(method)
         delegate_to_model(method, *args, &block)
-      elsif relationship = relationships[method] || relationships[method.to_s.singular.to_sym]
+      elsif relationship = relationships[method] || relationships[method.to_s.singularize.to_sym]
         delegate_to_relationship(relationship, *args)
       else
         super
@@ -1456,7 +1461,7 @@ module DataMapper
     # @api private
     def delegate_to_model(method, *args, &block)
       model = self.model
-      model.__send__(:with_scope, query) do
+      model.send(:with_scope, query) do
         model.send(method, *args, &block)
       end
     end

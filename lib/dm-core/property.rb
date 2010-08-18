@@ -1,5 +1,4 @@
 module DataMapper
-
   # = Properties
   # Properties for a model are not derived from a database structure, but
   # instead explicitly declared inside your model class definitions. These
@@ -96,7 +95,7 @@ module DataMapper
   # DataMapper. These lazily loaded properties are fetched on demand when their
   # accessor is called for the first time (as it is often unnecessary to
   # instantiate -every- property -every- time an object is loaded).  For
-  # instance, DataMapper::Types::Text fields are lazy loading by default,
+  # instance, DataMapper::Property::Text fields are lazy loading by default,
   # although you can over-ride this behavior if you wish:
   #
   # Example:
@@ -274,7 +273,7 @@ module DataMapper
   #
   #  :scale               The number of significant digits to the right of the decimal point.
   #                       Only makes sense for float type properties. Must be > 0.
-  #                       Default is nil for Float type and 10 for BigDecimal type.
+  #                       Default is nil for Float type and 10 for BigDecimal
   #
   #  All other keys you pass to +property+ method are stored and available
   #  as options[:extra_keys].
@@ -289,65 +288,187 @@ module DataMapper
   # * You may declare a Property with the data-type of <tt>Class</tt>.
   #   see SingleTableInheritance for more on how to use <tt>Class</tt> columns.
   class Property
-    include Extlib::Assertions
+    module PassThroughLoadDump
+      # @api semipublic
+      def load(value)
+        unless value.nil?
+          value = type.load(value, self) if type
+          typecast(value)
+        else
+          value
+        end
+      end
+
+      # Stub instance method for dumping
+      #
+      # @param value     [Object, nil]    value to dump
+      #
+      # @return [Object] Dumped object
+      #
+      # @api semipublic
+      def dump(value)
+        if type
+          type.dump(value, self)
+        else
+          value
+        end
+      end
+    end
+
+    include DataMapper::Assertions
+    include Subject
+    extend Chainable
     extend Deprecate
     extend Equalizer
 
     deprecate :unique,    :unique?
-    deprecate :size,      :length
     deprecate :nullable?, :allow_nil?
+    deprecate :value,     :dump
 
     equalize :model, :name
 
-    # NOTE: PLEASE update OPTIONS in DataMapper::Type when updating
-    # them here
-    OPTIONS = [
-      :accessor, :reader, :writer,
-      :lazy, :default, :key, :serial, :field, :size, :length,
-      :format, :index, :unique_index, :auto_validation,
-      :validates, :unique, :precision, :scale, :min, :max,
-      :allow_nil, :allow_blank, :required
-    ]
-
     PRIMITIVES = [
       TrueClass,
-      String,
-      Float,
-      Integer,
-      BigDecimal,
-      DateTime,
-      Date,
-      Time,
-      Object,
-      Class,
-      DataMapper::Types::Text,
+      ::String,
+      ::Float,
+      ::Integer,
+      ::BigDecimal,
+      ::DateTime,
+      ::Date,
+      ::Time,
+      ::Class
     ].to_set.freeze
+
+    OPTIONS = [
+      :accessor, :reader, :writer,
+      :lazy, :default, :key, :field,
+      :index, :unique_index,
+      :unique, :allow_nil, :allow_blank, :required
+    ]
 
     # Possible :visibility option values
     VISIBILITY_OPTIONS = [ :public, :protected, :private ].to_set.freeze
 
-    DEFAULT_LENGTH           = 50
-    DEFAULT_PRECISION        = 10
-    DEFAULT_SCALE_BIGDECIMAL = 0    # Default scale for BigDecimal type
-    DEFAULT_SCALE_FLOAT      = nil  # Default scale for Float type
-    DEFAULT_NUMERIC_MIN      = 0
-    DEFAULT_NUMERIC_MAX      = 2**31-1
-
     attr_reader :primitive, :model, :name, :instance_variable_name,
       :type, :reader_visibility, :writer_visibility, :options,
-      :default, :precision, :scale, :min, :max, :repository_name,
-      :allow_nil, :allow_blank, :required
+      :default, :repository_name, :allow_nil, :allow_blank, :required
+
+    class << self
+      extend Deprecate
+
+      deprecate :all_descendants, :descendants
+
+      # @api semipublic
+      def determine_class(type)
+        if type < DataMapper::Property::Object
+          return type
+        end
+
+        name  = DataMapper::Inflector.demodulize(type.name)
+        klass = find_class(name)
+
+        if !klass && type < DataMapper::Type
+          klass = find_class(type.primitive.name)
+        end
+
+        klass
+      end
+
+      # @api semipublic
+      def find_class(name)
+        klass = descendants.detect do |descendant|
+          DataMapper::Inflector.demodulize(descendant.name) == name
+        end
+
+        if !klass && const_defined?(name)
+          klass = const_get(name)
+        end
+
+        klass
+      end
+
+      # @api public
+      def descendants
+        @descendants ||= DescendantSet.new
+      end
+
+      # @api private
+      def inherited(descendant)
+        descendants << descendant
+
+        # inherit accepted options
+        descendant.accepted_options.concat(accepted_options)
+
+        # inherit the option values
+        options.each { |key, value| descendant.send(key, value) }
+      end
+
+      # @api public
+      def accepted_options
+        @accepted_options ||= []
+      end
+
+      # @api public
+      def accept_options(*args)
+        accepted_options.concat(args)
+
+        # create methods for each new option
+        args.each do |property_option|
+          class_eval <<-RUBY, __FILE__, __LINE__ + 1
+            def self.#{property_option}(value = Undefined)           # def self.unique(value = Undefined)
+              return @#{property_option} if value.equal?(Undefined)  #   return @unique if value.equal?(Undefined)
+              descendants.each do |descendant|                       #   descendants.each do |descendant|
+                descendant.#{property_option}(value)                 #     descendant.unique(value)
+              end                                                    #   end
+              @#{property_option} = value                            #   @unique = value
+            end                                                      # end
+          RUBY
+        end
+
+        descendants.each { |descendant| descendant.accepted_options.concat(args) }
+      end
+
+      # @api private
+      def nullable(*args)
+        # :required is preferable to :allow_nil, but :nullable maps precisely to :allow_nil
+        warn "#nullable is deprecated, use #required instead (#{caller[0]})"
+        allow_nil(*args)
+      end
+
+      # Gives all the options set on this type
+      #
+      # @return [Hash] with all options and their values set on this type
+      #
+      # @api public
+      def options
+        options = {}
+        accepted_options.each do |method|
+          value = send(method)
+          options[method] = send(method) unless value.nil?
+        end
+        options
+      end
+    end
+
+    accept_options :primitive, *Property::OPTIONS
+
+    # A hook to allow types to extend or modify property it's bound to.
+    # Implementations are not supposed to modify the state of the type class, and
+    # should produce no side-effects on the type class.
+    def bind
+      # no op
+    end
 
     # Supplies the field in the data-store which the property corresponds to
     #
     # @return [String] name of field in data-store
     #
     # @api semipublic
-    def field(repository_name = nil)
+    def field(repository_name = Undefined)
       self_repository_name = self.repository_name
       klass                = self.class
 
-      if repository_name
+      unless repository_name.equal?(Undefined)
         warn "Passing in +repository_name+ to #{klass}#field is deprecated (#{caller[0]})"
 
         if repository_name != self_repository_name
@@ -368,7 +489,7 @@ module DataMapper
     #
     # @api public
     def unique?
-      @unique
+      !!@unique
     end
 
     # Returns the hash of the property name
@@ -384,29 +505,13 @@ module DataMapper
       name.hash
     end
 
-    # Returns maximum property length (if applicable).
-    # This usually only makes sense when property is of
-    # type Range or custom type.
-    #
-    # @return [Integer, nil]
-    #   the maximum length of this property
-    #
-    # @api semipublic
-    def length
-      if @length.kind_of?(Range)
-        @length.max
-      else
-        @length
-      end
-    end
-
     # Returns index name if property has index.
     #
-    # @return [true, Symbol, Array, nil]
+    # @return [Boolean, Symbol, Array]
     #   returns true if property is indexed by itself
     #   returns a Symbol if the property is indexed with other properties
     #   returns an Array if the property belongs to multiple indexes
-    #   returns nil if the property does not belong to any indexes
+    #   returns false if the property does not belong to any indexes
     #
     # @api public
     def index
@@ -416,15 +521,25 @@ module DataMapper
     # Returns true if property has unique index. Serial properties and
     # keys are unique by default.
     #
-    # @return [true, Symbol, Array, nil]
+    # @return [Boolean, Symbol, Array]
     #   returns true if property is indexed by itself
     #   returns a Symbol if the property is indexed with other properties
     #   returns an Array if the property belongs to multiple indexes
-    #   returns nil if the property does not belong to any indexes
+    #   returns false if the property does not belong to any indexes
     #
     # @api public
     def unique_index
       @unique_index
+    end
+
+    # @api public
+    def kind_of?(klass)
+      super || klass == Property
+    end
+
+    # @api public
+    def instance_of?(klass)
+      super || klass == Property
     end
 
     # Returns whether or not the property is to be lazy-loaded
@@ -509,13 +624,7 @@ module DataMapper
     #
     # @api private
     def get(resource)
-      lazy_load(resource) unless loaded?(resource) || resource.new?
-
-      if loaded?(resource)
-        get!(resource)
-      else
-        set(resource, default? ? default_for(resource) : nil)
-      end
+      get!(resource)
     end
 
     # Fetch the ivar value in the resource
@@ -529,37 +638,6 @@ module DataMapper
     # @api private
     def get!(resource)
       resource.instance_variable_get(instance_variable_name)
-    end
-
-    # Sets original value of the property on given resource.
-    # When property is set on DataMapper resource instance,
-    # original value is preserved. This makes possible to
-    # track dirty attributes and save only those really changed,
-    # and avoid extra queries to the data source in certain
-    # situations.
-    #
-    # @param [Resource] resource
-    #   model instance for which to set the original value
-    # @param [Object] new_value
-    #   the new value that will be set for the property
-    #
-    # @api private
-    def set_original_value(resource, new_value)
-      original_attributes = resource.original_attributes
-      old_value           = get!(resource)
-
-      if resource.new?
-        # always track changes to a new resource
-        original_attributes[self] = nil
-      elsif original_attributes.key?(self)
-        # stop tracking if the new value is the same as the original
-        if new_value == original_attributes[self]
-          original_attributes.delete(self)
-        end
-      elsif new_value != old_value
-        # track the changed value
-        original_attributes[self] = old_value
-      end
     end
 
     # Provides a standardized setter method for the property
@@ -576,9 +654,7 @@ module DataMapper
     #
     # @api private
     def set(resource, value)
-      new_value = typecast(value)
-      set_original_value(resource, new_value)
-      set!(resource, new_value)
+      set!(resource, typecast(value))
     end
 
     # Set the ivar value in the resource
@@ -616,6 +692,7 @@ module DataMapper
     #
     # @api private
     def lazy_load(resource)
+      return if loaded?(resource)
       resource.__send__(:lazy_load, lazy_load_properties)
     end
 
@@ -633,101 +710,14 @@ module DataMapper
       @properties ||= model.properties(repository_name)
     end
 
-    # typecasts values into a primitive (Ruby class that backs DataMapper
-    # property type). If property type can handle typecasting, it is delegated.
-    # How typecasting is perfomed, depends on the primitive of the type.
-    #
-    # If type's primitive is a TrueClass, values of 1, t and true are casted to true.
-    #
-    # For String primitive, +to_s+ is called on value.
-    #
-    # For Float primitive, +to_f+ is called on value but only if value is a number
-    # otherwise value is returned.
-    #
-    # For Integer primitive, +to_i+ is called on value but only if value is a
-    # number, otherwise value is returned.
-    #
-    # For BigDecimal primitive, +to_d+ is called on value but only if value is a
-    # number, otherwise value is returned.
-    #
-    # Casting to DateTime, Time and Date can handle both hashes with keys like :day or
-    # :hour and strings in format methods like Time.parse can handle.
-    #
-    # @param [#to_s, #to_f, #to_i, #to_d, Hash] value
-    #   the value to typecast
-    #
-    # @return [rue, String, Float, Integer, BigDecimal, DateTime, Date, Time, Class]
-    #   The typecasted +value+
-    #
     # @api semipublic
     def typecast(value)
-      type      = self.type
-      primitive = self.primitive
-
-      return type.typecast(value, self) if type.respond_to?(:typecast)
-      return value if primitive?(value) || value.nil?
-
-      if    primitive == Integer    then typecast_to_integer(value)
-      elsif primitive == String     then typecast_to_string(value)
-      elsif primitive == TrueClass  then typecast_to_boolean(value)
-      elsif primitive == BigDecimal then typecast_to_bigdecimal(value)
-      elsif primitive == Float      then typecast_to_float(value)
-      elsif primitive == DateTime   then typecast_to_datetime(value)
-      elsif primitive == Time       then typecast_to_time(value)
-      elsif primitive == Date       then typecast_to_date(value)
-      elsif primitive == Class      then typecast_to_class(value)
-      else
+      if @type && @type.respond_to?(:typecast)
+        @type.typecast(value, self)
+      elsif value.nil? || primitive?(value)
         value
-      end
-    end
-
-    # Returns a default value of the
-    # property for given resource.
-    #
-    # When default value is a callable object,
-    # it is called with resource and property passed
-    # as arguments.
-    #
-    # @param [Resource] resource
-    #   the model instance for which the default is to be set
-    #
-    # @return [Object]
-    #   the default value of this property for +resource+
-    #
-    # @api semipublic
-    def default_for(resource)
-      if @default.respond_to?(:call)
-        @default.call(resource, self)
-      else
-        @default.try_dup
-      end
-    end
-
-    # Returns true if the property has a default value
-    #
-    # @return [Boolean]
-    #   true if the property has a default value
-    #
-    # @api semipublic
-    def default?
-      @options.key?(:default)
-    end
-
-    # Returns given value unchanged for core types and
-    # uses +dump+ method of the property type for custom types.
-    #
-    # @param [Object] loaded_value
-    #   the value to be converted into a storeable (ie., primitive) value
-    #
-    # @return [Object]
-    #   the primitive value to be stored in the repository for +val+
-    #
-    # @api semipublic
-    def value(loaded_value)
-      if custom?
-        type.dump(loaded_value, self)
-      else
-        loaded_value
+      elsif respond_to?(:typecast_to_primitive)
+        typecast_to_primitive(value)
       end
     end
 
@@ -740,9 +730,14 @@ module DataMapper
     #   true if the value is valid
     #
     # @api semipulic
-    def valid?(loaded_value, negated = false)
-      dumped_value = self.value(loaded_value)
-      primitive?(dumped_value) || (dumped_value.nil? && (allow_nil? || negated))
+    def valid?(value, negated = false)
+      dumped_value = dump(value)
+
+      if required? && dumped_value.nil?
+        negated || false
+      else
+        primitive?(dumped_value) || (dumped_value.nil? && (allow_nil? || negated))
+      end
     end
 
     # Returns a concise string representation of the property instance.
@@ -765,139 +760,67 @@ module DataMapper
     #
     # @api semipublic
     def primitive?(value)
-      primitive = self.primitive
-      if primitive == TrueClass
-        value == true || value == false
-      elsif primitive == Types::Text
-        value.kind_of?(String)
-      else
-        value.kind_of?(primitive)
+      value.kind_of?(primitive)
+    end
+
+    chainable do
+      def self.new(model, name, options = {}, type = nil)
+        super
       end
     end
 
-    private
+    protected
 
     # @api semipublic
-    def initialize(model, name, type, options = {})
-      assert_kind_of 'model',   model,   Model
-      assert_kind_of 'name',    name,    Symbol
-      assert_kind_of 'type',    type,    Class, Module
-      assert_kind_of 'options', options, Hash
+    def initialize(model, name, options = {}, type = nil)
+      options = options.to_hash.dup
 
-      options       = options.dup
-      caller_method = caller[2]
+      if type && !kind_of?(type)
+        warn "#{type} < DataMapper::Type is deprecated, use the new DataMapper::Property API instead (#{caller[2]})"
+        @type = type
+      end
 
-      if TrueClass == type
-        warn "#{type} is deprecated, use Boolean instead at #{caller_method}"
-        type = Types::Boolean
-      elsif Integer == type && options.delete(:serial)
-        warn "#{type} with explicit :serial option is deprecated, use Serial instead (#{caller_method})"
-        type = Types::Serial
-      elsif options.key?(:size)
-        if String == type
-          warn ":size option is deprecated, use #{type} with :length instead (#{caller_method})"
-          length = options.delete(:size)
-          options[:length] = length unless options.key?(:length)
-        elsif Numeric > type
-          warn ":size option is deprecated, specify :min and :max instead (#{caller_method})"
-        end
-      elsif options.key?(:nullable)
-        nullable_options = options.only(:nullable)
-        required_options = { :required => !options.delete(:nullable) }
-        warn "#{nullable_options.inspect} is deprecated, use #{required_options.inspect} instead (#{caller_method})"
-        options.update(required_options)
+      reserved_method_names = DataMapper::Resource.instance_methods + DataMapper::Resource.private_instance_methods
+      if reserved_method_names.map { |m| m.to_s }.include?(name.to_s)
+        raise ArgumentError, "+name+ was #{name.inspect}, which cannot be used as a property name since it collides with an existing method"
       end
 
       assert_valid_options(options)
 
-      # if the type can be found within Types then
-      # use that class rather than the primitive
-      type_name = type.name
-      unless type_name.blank?
-        type = Types.find_const(type_name)
-      end
-
-      unless PRIMITIVES.include?(type) || (Type > type && PRIMITIVES.include?(type.primitive))
-        raise ArgumentError, "+type+ was #{type.inspect}, which is not a supported type"
-      end
+      predefined_options = self.class.options
+      predefined_options.merge!(@type.options) if @type
 
       @repository_name        = model.repository_name
       @model                  = model
-      @name                   = name.to_s.sub(/\?$/, '').to_sym
-      @type                   = type
-      @custom                 = Type > @type
-      @options                = (@custom ? @type.options.merge(options) : options).freeze
+      @name                   = name.to_s.chomp('?').to_sym
+      @options                = predefined_options.merge(options).freeze
       @instance_variable_name = "@#{@name}".freeze
 
-      @primitive = @type.respond_to?(:primitive) ? @type.primitive : @type
+      @primitive = self.class.primitive || @type.primitive
+      @custom    = !@type.nil?
       @field     = @options[:field].freeze
       @default   = @options[:default]
 
       @serial       = @options.fetch(:serial,       false)
-      @key          = @options.fetch(:key,          @serial || false)
+      @key          = @options.fetch(:key,          @serial)
+      @unique       = @options.fetch(:unique,       @key ? :key : false)
       @required     = @options.fetch(:required,     @key)
       @allow_nil    = @options.fetch(:allow_nil,    !@required)
       @allow_blank  = @options.fetch(:allow_blank,  !@required)
-      @index        = @options.fetch(:index,        nil)
-      @unique_index = @options.fetch(:unique_index, nil)
-      @unique       = @options.fetch(:unique,       @serial || @key || false)
-      @lazy         = @options.fetch(:lazy,         @type.respond_to?(:lazy) ? @type.lazy : false) && !@key
-
-      float_primitive = Float == @primitive
-
-      # assign attributes per-type
-      if [ String, Class ].include?(@primitive)
-        @length = @options.fetch(:length, DEFAULT_LENGTH)
-      elsif DataMapper::Types::Text == @primitive
-        @length = @options.fetch(:length)
-      elsif [ BigDecimal, Float ].include?(@primitive)
-        @precision = @options.fetch(:precision, DEFAULT_PRECISION)
-        @scale     = @options.fetch(:scale,     float_primitive ? DEFAULT_SCALE_FLOAT : DEFAULT_SCALE_BIGDECIMAL)
-
-        precision_inspect = @precision.inspect
-        scale_inspect     = @scale.inspect
-
-        unless @precision > 0
-          raise ArgumentError, "precision must be greater than 0, but was #{precision_inspect}"
-        end
-
-        unless float_primitive && @scale.nil?
-          unless @scale >= 0
-            raise ArgumentError, "scale must be equal to or greater than 0, but was #{scale_inspect}"
-          end
-
-          unless @precision >= @scale
-            raise ArgumentError, "precision must be equal to or greater than scale, but was #{precision_inspect} and scale was #{scale_inspect}"
-          end
-        end
-      end
-
-      if Numeric > @primitive && (@options.keys & [ :min, :max ]).any?
-        @min = @options.fetch(:min, DEFAULT_NUMERIC_MIN)
-        @max = @options.fetch(:max, DEFAULT_NUMERIC_MAX)
-
-        if @max < DEFAULT_NUMERIC_MIN && !@options.key?(:min)
-          raise ArgumentError, "min should be specified when the max is less than #{DEFAULT_NUMERIC_MIN}"
-        elsif @max < @min
-          raise ArgumentError, "max must be less than the min, but was #{@max} while the min was #{@min}"
-        end
-      end
+      @index        = @options.fetch(:index,        false)
+      @unique_index = @options.fetch(:unique_index, @unique)
+      @lazy         = @options.fetch(:lazy,         false) && !@key
 
       determine_visibility
 
-      if custom?
-        type.bind(self)
-      end
-
-      # comes from dm-validations
-      @model.auto_generate_validations(self) if @model.respond_to?(:auto_generate_validations)
+      @type ? @type.bind(self) : bind
     end
 
     # @api private
     def assert_valid_options(options)
       keys = options.keys
 
-      if (unknown_keys = keys - OPTIONS).any?
+      if (unknown_keys = keys - self.class.accepted_options).any?
         raise ArgumentError, "options #{unknown_keys.map { |key| key.inspect }.join(' and ')} are unknown"
       end
 
@@ -906,7 +829,7 @@ module DataMapper
 
         case key
           when :field
-            assert_kind_of "options[:#{key}]", value, String
+            assert_kind_of "options[:#{key}]", value, ::String
 
           when :default
             if value.nil?
@@ -928,10 +851,10 @@ module DataMapper
             end
 
           when :length
-            assert_kind_of "options[:#{key}]", value, Range, Integer
+            assert_kind_of "options[:#{key}]", value, Range, ::Integer
 
           when :size, :precision, :scale
-            assert_kind_of "options[:#{key}]", value, Integer
+            assert_kind_of "options[:#{key}]", value, ::Integer
 
           when :reader, :writer, :accessor
             assert_kind_of "options[:#{key}]", value, Symbol
@@ -954,255 +877,10 @@ module DataMapper
     #
     # @api private
     def determine_visibility
-      default_accessor = @options[:accessor] || :public
+      default_accessor = @options.fetch(:accessor, :public)
 
-      @reader_visibility = @options[:reader] || default_accessor
-      @writer_visibility = @options[:writer] || default_accessor
-    end
-
-    # Typecast a value to an Integer
-    #
-    # @param [#to_str, #to_i] value
-    #   value to typecast
-    #
-    # @return [Integer]
-    #   Integer constructed from value
-    #
-    # @api private
-    def typecast_to_integer(value)
-      typecast_to_numeric(value, :to_i)
-    end
-
-    # Typecast a value to a String
-    #
-    # @param [#to_s] value
-    #   value to typecast
-    #
-    # @return [String]
-    #   String constructed from value
-    #
-    # @api private
-    def typecast_to_string(value)
-      value.to_s
-    end
-
-    # Typecast a value to a true or false
-    #
-    # @param [Integer, #to_str] value
-    #   value to typecast
-    #
-    # @return [Boolean]
-    #   true or false constructed from value
-    #
-    # @api private
-    def typecast_to_boolean(value)
-      if value.kind_of?(Integer)
-        return true  if value == 1
-        return false if value == 0
-      elsif value.respond_to?(:to_str)
-        string_value = value.to_str.downcase
-        return true  if %w[ true  1 t ].include?(string_value)
-        return false if %w[ false 0 f ].include?(string_value)
-      end
-
-      value
-    end
-
-    # Typecast a value to a BigDecimal
-    #
-    # @param [#to_str, #to_d, Integer] value
-    #   value to typecast
-    #
-    # @return [BigDecimal]
-    #   BigDecimal constructed from value
-    #
-    # @api private
-    def typecast_to_bigdecimal(value)
-      if value.kind_of?(Integer)
-        # TODO: remove this case when Integer#to_d added by extlib
-        value.to_s.to_d
-      else
-        typecast_to_numeric(value, :to_d)
-      end
-    end
-
-    # Typecast a value to a Float
-    #
-    # @param [#to_str, #to_f] value
-    #   value to typecast
-    #
-    # @return [Float]
-    #   Float constructed from value
-    #
-    # @api private
-    def typecast_to_float(value)
-      typecast_to_numeric(value, :to_f)
-    end
-
-    # Match numeric string
-    #
-    # @param [#to_str, Numeric] value
-    #   value to typecast
-    # @param [Symbol] method
-    #   method to typecast with
-    #
-    # @return [Numeric]
-    #   number if matched, value if no match
-    #
-    # @api private
-    def typecast_to_numeric(value, method)
-      if value.respond_to?(:to_str)
-        if value.to_str =~ /\A(-?(?:0|[1-9]\d*)(?:\.\d+)?|(?:\.\d+))\z/
-          $1.send(method)
-        else
-          value
-        end
-      elsif value.respond_to?(method)
-        value.send(method)
-      else
-        value
-      end
-    end
-
-    # Typecasts an arbitrary value to a DateTime.
-    # Handles both Hashes and DateTime instances.
-    #
-    # @param [#to_mash, #to_s] value
-    #   value to be typecast
-    #
-    # @return [DateTime]
-    #   DateTime constructed from value
-    #
-    # @api private
-    def typecast_to_datetime(value)
-      if value.respond_to?(:to_datetime)
-        value.to_datetime
-      elsif value.respond_to?(:to_mash)
-        typecast_hash_to_datetime(value)
-      else
-        DateTime.parse(value.to_s)
-      end
-    rescue ArgumentError
-      value
-    end
-
-    # Typecasts an arbitrary value to a Date
-    # Handles both Hashes and Date instances.
-    #
-    # @param [#to_mash, #to_s] value
-    #   value to be typecast
-    #
-    # @return [Date]
-    #   Date constructed from value
-    #
-    # @api private
-    def typecast_to_date(value)
-      if value.respond_to?(:to_date)
-        value.to_date
-      elsif value.respond_to?(:to_mash)
-        typecast_hash_to_date(value)
-      else
-        Date.parse(value.to_s)
-      end
-    rescue ArgumentError
-      value
-    end
-
-    # Typecasts an arbitrary value to a Time
-    # Handles both Hashes and Time instances.
-    #
-    # @param [#to_mash, #to_s] value
-    #   value to be typecast
-    #
-    # @return [Time]
-    #   Time constructed from value
-    #
-    # @api private
-    def typecast_to_time(value)
-      if value.respond_to?(:to_time)
-        value.to_time
-      elsif value.respond_to?(:to_mash)
-        typecast_hash_to_time(value)
-      else
-        Time.parse(value.to_s)
-      end
-    rescue ArgumentError
-      value
-    end
-
-    # Creates a DateTime instance from a Hash with keys :year, :month, :day,
-    # :hour, :min, :sec
-    #
-    # @param [#to_mash] value
-    #   value to be typecast
-    #
-    # @return [DateTime]
-    #   DateTime constructed from hash
-    #
-    # @api private
-    def typecast_hash_to_datetime(value)
-      DateTime.new(*extract_time(value))
-    end
-
-    # Creates a Date instance from a Hash with keys :year, :month, :day
-    #
-    # @param [#to_mash] value
-    #   value to be typecast
-    #
-    # @return [Date]
-    #   Date constructed from hash
-    #
-    # @api private
-    def typecast_hash_to_date(value)
-      Date.new(*extract_time(value)[0, 3])
-    end
-
-    # Creates a Time instance from a Hash with keys :year, :month, :day,
-    # :hour, :min, :sec
-    #
-    # @param [#to_mash] value
-    #   value to be typecast
-    #
-    # @return [Time]
-    #   Time constructed from hash
-    #
-    # @api private
-    def typecast_hash_to_time(value)
-      Time.local(*extract_time(value))
-    end
-
-    # Extracts the given args from the hash. If a value does not exist, it
-    # uses the value of Time.now.
-    #
-    # @param [#to_mash] value
-    #   value to extract time args from
-    #
-    # @return [Array]
-    #   Extracted values
-    #
-    # @api private
-    def extract_time(value)
-      mash = value.to_mash
-      now  = Time.now
-
-      [ :year, :month, :day, :hour, :min, :sec ].map do |segment|
-        typecast_to_numeric(mash.fetch(segment, now.send(segment)), :to_i)
-      end
-    end
-
-    # Typecast a value to a Class
-    #
-    # @param [#to_s] value
-    #   value to typecast
-    #
-    # @return [Class]
-    #   Class constructed from value
-    #
-    # @api private
-    def typecast_to_class(value)
-      model.find_const(value.to_s)
-    rescue NameError
-      value
+      @reader_visibility = @options.fetch(:reader, default_accessor)
+      @writer_visibility = @options.fetch(:writer, default_accessor)
     end
   end # class Property
-end # module DataMapper
+end

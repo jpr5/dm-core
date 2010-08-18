@@ -10,11 +10,11 @@ module DataMapper
       # TODO: replace this with BasicObject
       instance_methods.each do |method|
         next if method =~ /\A__/ ||
-          %w[ send class dup object_id kind_of? instance_of? respond_to? equal? freeze frozen? should should_not instance_variables instance_variable_set instance_variable_get instance_variable_defined? remove_instance_variable extend hash inspect copy_object ].include?(method.to_s)
+          %w[ send class dup object_id kind_of? instance_of? respond_to? respond_to_missing? equal? freeze frozen? should should_not instance_variables instance_variable_set instance_variable_get instance_variable_defined? remove_instance_variable extend hash inspect copy_object initialize_dup ].include?(method.to_s)
         undef_method method
       end
 
-      include Extlib::Assertions
+      include DataMapper::Assertions
       extend Equalizer
 
       equalize :relationships, :property
@@ -62,16 +62,14 @@ module DataMapper
 
       # @api semipublic
       def initialize(relationships, property_name = nil)
-        assert_kind_of 'relationships', relationships, Array
-        assert_kind_of 'property_name', property_name, Symbol, NilClass
-
-        @relationships = relationships.dup
+        @relationships = relationships.to_ary.dup
 
         last_relationship = @relationships.last
         @repository_name  = last_relationship.relative_target_repository_name
         @model            = last_relationship.target_model
 
         if property_name
+          property_name = property_name.to_sym
           @property = @model.properties(@repository_name)[property_name] ||
             raise(ArgumentError, "Unknown property '#{property_name}' in #{@model}")
         end

@@ -1,9 +1,9 @@
 module DataMapper
   class Repository
-    include Extlib::Assertions
+    include DataMapper::Assertions
     extend Equalizer
 
-    equalize :name, :adapter
+    equalize :name
 
     # Get the list of adapters registered for all Repositories,
     # keyed by repository name.
@@ -44,6 +44,9 @@ module DataMapper
 
     # @api semipublic
     attr_reader :name
+
+    # @api semipublic
+    alias to_sym name
 
     # Get the adapter for this repository
     #
@@ -114,6 +117,20 @@ module DataMapper
       end
     end
 
+    # Create a Query or subclass instance for this repository.
+    #
+    # @param [Model] model
+    #   the Model to retrieve results from
+    # @param [Hash] options
+    #   the conditions and scope
+    #
+    # @return [Query]
+    #
+    # @api semipublic
+    def new_query(model, options = {})
+      adapter.new_query(self, model, options)
+    end
+
     # Create one or more resource instances in this repository.
     #
     #   TODO: create example
@@ -159,7 +176,7 @@ module DataMapper
     #
     # @api semipublic
     def update(attributes, collection)
-      return 0 unless collection.query.valid?
+      return 0 unless collection.query.valid? && attributes.any?
       adapter.update(attributes, collection)
     end
 
@@ -202,9 +219,7 @@ module DataMapper
     #
     # @api semipublic
     def initialize(name)
-      assert_kind_of 'name', name, Symbol
-
-      @name          = name
+      @name          = name.to_sym
       @identity_maps = {}
     end
   end # class Repository

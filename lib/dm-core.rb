@@ -2,11 +2,62 @@ require 'addressable/uri'
 require 'bigdecimal'
 require 'bigdecimal/util'
 require 'date'
-require 'extlib'
 require 'pathname'
 require 'set'
 require 'time'
 require 'yaml'
+
+module DataMapper
+  module Undefined; end
+end
+
+begin
+
+  # Prefer active_support
+
+  require 'active_support/core_ext/kernel/singleton_class'
+  require 'active_support/core_ext/class/inheritable_attributes'
+  require 'active_support/core_ext/object/blank'
+  require 'active_support/core_ext/hash/except'
+
+  require 'active_support/hash_with_indifferent_access'
+  require 'active_support/inflector'
+
+  Mash = ActiveSupport::HashWithIndifferentAccess
+
+  require 'dm-core/core_ext/hash'
+  require 'dm-core/core_ext/object'
+  require 'dm-core/core_ext/string'
+
+  module DataMapper
+    Inflector = ActiveSupport::Inflector
+  end
+
+rescue LoadError
+
+  # Default to extlib
+
+  require 'extlib/inflection'
+  require 'extlib/mash'
+  require 'extlib/string'
+  require 'extlib/class'
+  require 'extlib/hash'
+  require 'extlib/object'
+  require 'extlib/blank'
+
+  class Object
+    unless respond_to?(:singleton_class)
+      def singleton_class
+        class << self; self end
+      end
+    end
+  end
+
+  module DataMapper
+    Inflector = Extlib::Inflection
+  end
+
+end
 
 begin
   require 'fastthread'
@@ -14,59 +65,86 @@ rescue LoadError
   # fastthread not installed
 end
 
-dir = Pathname(__FILE__).dirname.expand_path / 'dm-core'
+require 'dm-core/core_ext/pathname'
+require 'dm-core/core_ext/module'
+require 'dm-core/core_ext/array'
 
-require dir / 'support' / 'chainable'
-require dir / 'support' / 'deprecate'
-require dir / 'support' / 'equalizer'
+require 'dm-core/support/chainable'
+require 'dm-core/support/deprecate'
+require 'dm-core/support/descendant_set'
+require 'dm-core/support/equalizer'
+require 'dm-core/support/assertions'
+require 'dm-core/support/lazy_array'
+require 'dm-core/support/local_object_space'
+require 'dm-core/support/hook'
+require 'dm-core/support/subject'
 
-require dir / 'model'
-require dir / 'model' / 'descendant_set'
-require dir / 'model' / 'hook'
-require dir / 'model' / 'is'
-require dir / 'model' / 'scope'
-require dir / 'model' / 'relationship'
-require dir / 'model' / 'property'
+require 'dm-core/collection'
 
-require dir / 'collection'
+require 'dm-core/type'
+require 'dm-core/types/boolean'
+require 'dm-core/types/discriminator'
+require 'dm-core/types/text'
+require 'dm-core/types/object'
+require 'dm-core/types/serial'
 
-require dir / 'type'
-require dir / 'types' / 'boolean'
-require dir / 'types' / 'discriminator'
-require dir / 'types' / 'text'
-require dir / 'types' / 'paranoid_datetime'     # TODO: move to dm-more
-require dir / 'types' / 'paranoid_boolean'      # TODO: move to dm-more
-require dir / 'types' / 'object'
-require dir / 'types' / 'serial'
+require 'dm-core/property'
+require 'dm-core/property/object'
+require 'dm-core/property/string'
+require 'dm-core/property/binary'
+require 'dm-core/property/text'
+require 'dm-core/property/numeric'
+require 'dm-core/property/float'
+require 'dm-core/property/decimal'
+require 'dm-core/property/boolean'
+require 'dm-core/property/integer'
+require 'dm-core/property/serial'
+require 'dm-core/property/date'
+require 'dm-core/property/date_time'
+require 'dm-core/property/time'
+require 'dm-core/property/class'
+require 'dm-core/property/discriminator'
 
-require dir / 'adapters'
-require dir / 'adapters' / 'abstract_adapter'
-require dir / 'associations' / 'relationship'
-require dir / 'associations' / 'one_to_many'
-require dir / 'associations' / 'one_to_one'
-require dir / 'associations' / 'many_to_one'
-require dir / 'associations' / 'many_to_many'
-require dir / 'identity_map'
-require dir / 'migrations'                      # TODO: move to dm-more
-require dir / 'property'
-require dir / 'property_set'
-require dir / 'query'
-require dir / 'query' / 'conditions' / 'operation'
-require dir / 'query' / 'conditions' / 'comparison'
-require dir / 'query' / 'operator'
-require dir / 'query' / 'direction'
-require dir / 'query' / 'path'
-require dir / 'query' / 'sort'
-require dir / 'repository'
-require dir / 'resource'
-require dir / 'support' / 'logger'
-require dir / 'support' / 'naming_conventions'
-require dir / 'transaction'                     # TODO: move to dm-more
-require dir / 'version'
+require 'dm-core/property/lookup'
+require 'dm-core/property_set'
 
-require dir / 'core_ext' / 'enumerable'
-require dir / 'core_ext' / 'kernel'             # TODO: do not load automatically
-require dir / 'core_ext' / 'symbol'             # TODO: do not load automatically
+require 'dm-core/model'
+require 'dm-core/model/hook'
+require 'dm-core/model/is'
+require 'dm-core/model/scope'
+require 'dm-core/model/relationship'
+require 'dm-core/model/property'
+
+require 'dm-core/adapters'
+require 'dm-core/adapters/abstract_adapter'
+require 'dm-core/associations/relationship'
+require 'dm-core/associations/one_to_many'
+require 'dm-core/associations/one_to_one'
+require 'dm-core/associations/many_to_one'
+require 'dm-core/associations/many_to_many'
+require 'dm-core/identity_map'
+require 'dm-core/query'
+require 'dm-core/query/conditions/operation'
+require 'dm-core/query/conditions/comparison'
+require 'dm-core/query/operator'
+require 'dm-core/query/direction'
+require 'dm-core/query/path'
+require 'dm-core/query/sort'
+require 'dm-core/repository'
+require 'dm-core/resource'
+require 'dm-core/resource/state'
+require 'dm-core/resource/state/transient'
+require 'dm-core/resource/state/immutable'
+require 'dm-core/resource/state/persisted'
+require 'dm-core/resource/state/clean'
+require 'dm-core/resource/state/deleted'
+require 'dm-core/resource/state/dirty'
+require 'dm-core/support/logger'
+require 'dm-core/support/naming_conventions'
+require 'dm-core/version'
+
+require 'dm-core/core_ext/kernel'             # TODO: do not load automatically
+require 'dm-core/core_ext/symbol'             # TODO: do not load automatically
 
 # A logger should always be present. Lets be consistent with DO
 DataMapper::Logger.new(StringIO.new, :fatal)
@@ -121,7 +199,7 @@ end
 # see DataMapper::Logger for more information.
 #
 module DataMapper
-  extend Extlib::Assertions
+  extend DataMapper::Assertions
 
   class RepositoryNotSetupError < StandardError; end
 
@@ -136,6 +214,19 @@ module DataMapper
   class PersistenceError < RuntimeError; end
 
   class UpdateConflictError < PersistenceError; end
+
+  class SaveFailureError < PersistenceError
+    attr_reader :resource
+
+    def initialize(message, resource)
+      super(message)
+      @resource = resource
+    end
+  end
+
+  class ImmutableError < RuntimeError; end
+
+  class ImmutableDeletedError < ImmutableError; end
 
   # Raised on attempt to operate on collection of child objects
   # when parent object is not yet saved.
@@ -195,7 +286,7 @@ module DataMapper
     context = Repository.context
 
     current_repository = if name
-      assert_kind_of 'name', name, Symbol
+      name = name.to_sym
       context.detect { |repository| repository.name == name }
     else
       name = Repository.default_name
@@ -208,6 +299,52 @@ module DataMapper
       current_repository.scope { |*block_args| yield(*block_args) }
     else
       current_repository
+    end
+  end
+
+  # Perform necessary steps to finalize DataMapper for the current repository
+  #
+  # This method should be called after loading all models and plugins.
+  #
+  # It ensures foreign key properties and anonymous join models are created.
+  # These are otherwise lazily declared, which can lead to unexpected errors.
+  # It also performs basic validity checking of the DataMapper models.
+  #
+  # @return [DataMapper] The DataMapper module
+  #
+  # @api public
+  def self.finalize
+    Model.descendants.each do |model|
+      finalize_model(model)
+    end
+    self
+  end
+
+  private
+  # @api private
+  def self.finalize_model(model)
+    name            = model.name
+    repository_name = model.repository_name
+    relationships   = model.relationships(repository_name).values
+
+    if name.to_s.strip.empty?
+      raise IncompleteModelError, "#{model.inspect} must have a name"
+    end
+
+    if model.properties(repository_name).empty? &&
+      !relationships.any? { |relationship| relationship.kind_of?(Associations::ManyToOne::Relationship) }
+      raise IncompleteModelError, "#{name} must have at least one property or many to one relationship to be valid"
+    end
+
+    # initialize join models and target keys
+    relationships.each do |relationship|
+      relationship.child_key
+      relationship.through if relationship.respond_to?(:through)
+      relationship.via     if relationship.respond_to?(:via)
+    end
+
+    if model.key(repository_name).empty?
+      raise IncompleteModelError, "#{name} must have a key to be valid"
     end
   end
 end

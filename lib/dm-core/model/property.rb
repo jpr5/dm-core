@@ -7,7 +7,7 @@
 module DataMapper
   module Model
     module Property
-      Model.append_extensions self
+      Model.append_extensions self, DataMapper::Property::Lookup
 
       extend Chainable
 
@@ -48,7 +48,25 @@ module DataMapper
       #
       # @api public
       def property(name, type, options = {})
-        property = DataMapper::Property.new(self, name, type, options)
+        caller_method = caller[2]
+
+        if TrueClass == type
+          warn "#{type} is deprecated, use Boolean instead at #{caller_method}"
+          type = DataMapper::Property::Boolean
+        elsif BigDecimal == type
+          warn "#{type} is deprecated, use Decimal instead at #{caller_method}"
+          type = DataMapper::Property::Decimal
+        end
+
+        # if the type can be found within Property then
+        # use that class rather than the primitive
+        klass = DataMapper::Property.determine_class(type)
+
+        unless klass
+          raise ArgumentError, "+type+ was #{type.inspect}, which is not a supported type"
+        end
+
+        property = klass.new(self, name, options, type < DataMapper::Type ? type : nil)
 
         repository_name = self.repository_name
         properties      = properties(repository_name)
@@ -63,7 +81,7 @@ module DataMapper
 
             # make sure the property is created within the correct repository scope
             DataMapper.repository(repository_name) do
-              properties << DataMapper::Property.new(self, name, type, options)
+              properties << klass.new(self, name, options, type)
             end
           end
         end
@@ -109,6 +127,7 @@ module DataMapper
         # TODO: create PropertySet#copy that will copy the properties, but assign the
         # new Relationship objects to a supplied repository and model.  dup does not really
         # do what is needed
+        repository_name = repository_name.to_sym
 
         default_repository_name = self.default_repository_name
 
@@ -188,24 +207,28 @@ module DataMapper
         name                   = property.name.to_s
         reader_visibility      = property.reader_visibility
         instance_variable_name = property.instance_variable_name
-        primitive              = property.primitive
 
-        unless resource_method_defined?(name)
-          class_eval <<-RUBY, __FILE__, __LINE__ + 1
+        class_eval <<-RUBY, __FILE__, __LINE__ + 1
+          chainable do
             #{reader_visibility}
             def #{name}
               return #{instance_variable_name} if defined?(#{instance_variable_name})
-              #{instance_variable_name} = properties[#{name.inspect}].get(self)
+              property = properties[#{name.inspect}]
+              #{instance_variable_name} = property ? persisted_state.get(property) : nil
             end
-          RUBY
-        end
+          end
+        RUBY
 
         boolean_reader_name = "#{name}?"
 
-        if primitive == TrueClass && !resource_method_defined?(boolean_reader_name)
+        if property.kind_of?(DataMapper::Property::Boolean)
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
-            #{reader_visibility}
-            alias #{boolean_reader_name} #{name}
+            chainable do
+              #{reader_visibility}
+              def #{boolean_reader_name}
+                #{name}
+              end
+            end
           RUBY
         end
       end
@@ -219,12 +242,14 @@ module DataMapper
 
         writer_name = "#{name}="
 
-        return if resource_method_defined?(writer_name)
-
         class_eval <<-RUBY, __FILE__, __LINE__ + 1
-          #{writer_visibility}
-          def #{writer_name}(value)
-            properties[#{name.inspect}].set(self, value)
+          chainable do
+            #{writer_visibility}
+            def #{writer_name}(value)
+              property = properties[#{name.inspect}]
+              self.persisted_state = persisted_state.set(property, value)
+              persisted_state.get(property)
+            end
           end
         RUBY
       end

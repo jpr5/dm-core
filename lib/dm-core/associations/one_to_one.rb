@@ -3,8 +3,11 @@ module DataMapper
     module OneToOne #:nodoc:
       class Relationship < Associations::Relationship
         %w[ public protected private ].map do |visibility|
-          superclass.send("#{visibility}_instance_methods", false).each do |method|
-            undef_method method unless method.to_s == 'initialize'
+          methods = superclass.send("#{visibility}_instance_methods", false) |
+                    DataMapper::Subject.send("#{visibility}_instance_methods", false)
+
+          methods.each do |method|
+            undef_method method.to_sym unless method.to_s == 'initialize'
           end
         end
 
@@ -12,12 +15,16 @@ module DataMapper
         # for given source
         #
         # @api semipublic
-        def get(source, other_query = nil)
-          assert_kind_of 'source', source, source_model
+        def get(source, query = nil)
+          relationship.get(source, query).first
+        end
 
-          return unless loaded?(source) || valid_source?(source)
-
-          relationship.get(source, other_query).first
+        # Get the resource directly
+        #
+        # @api semipublic
+        def get!(source)
+          collection = relationship.get!(source)
+          collection.first if collection
         end
 
         # Sets and returns association target
@@ -25,10 +32,19 @@ module DataMapper
         #
         # @api semipublic
         def set(source, target)
-          assert_kind_of 'source', source, source_model
-          assert_kind_of 'target', target, target_model, Hash, NilClass
-
           relationship.set(source, [ target ].compact).first
+        end
+
+        # Sets the resource directly
+        #
+        # @api semipublic
+        def set!(source, target)
+          set(source, target)
+        end
+
+        # @api semipublic
+        def default_for(source)
+          relationship.default_for(source).first
         end
 
         # @api public
@@ -56,7 +72,7 @@ module DataMapper
         # @api semipublic
         def initialize(name, target_model, source_model, options = {})
           klass = options.key?(:through) ? ManyToMany::Relationship : OneToMany::Relationship
-          target_model ||= Extlib::Inflection.camelize(name).freeze
+          target_model ||= DataMapper::Inflector.camelize(name).freeze
           @relationship = klass.new(name, target_model, source_model, options)
         end
 

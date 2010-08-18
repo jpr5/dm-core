@@ -12,11 +12,21 @@ module DataMapper
     # Note that in case of adapters to relational databases it makes
     # sense to inherit from DataObjectsAdapter class.
     class AbstractAdapter
-      include Extlib::Assertions
-      extend Extlib::Assertions
+      include DataMapper::Assertions
+      extend DataMapper::Assertions
       extend Equalizer
 
       equalize :name, :options, :resource_naming_convention, :field_naming_convention
+
+      # @api semipublic
+      def self.descendants
+        @descendants ||= DescendantSet.new([ self ])
+      end
+
+      # @api private
+      def self.inherited(descendant)
+        descendants << descendant
+      end
 
       # Adapter name
       #
@@ -27,7 +37,7 @@ module DataMapper
       #
       # DataMapper.setup(:default, 'postgres://postgres@localhost/dm_core_test')
       #
-      # then adapter name is currently be set to is :default
+      # the adapter name is currently set to :default
       #
       # @return [Symbol]
       #   the adapter name
@@ -142,6 +152,26 @@ module DataMapper
         raise NotImplementedError, "#{self.class}#delete not implemented"
       end
 
+      # Create a Query object or subclass.
+      #
+      # Alter this method if you'd like to return an adapter specific Query subclass.
+      #
+      # @param [Repository] repository
+      #   the Repository to retrieve results from
+      # @param [Model] model
+      #   the Model to retrieve results from
+      # @param [Hash] options
+      #   the conditions and scope
+      #
+      # @return [Query]
+      #
+      # @api semipublic
+      #--
+      # TODO: DataObjects::Connection.create_command style magic (Adapter)::Query?
+      def new_query(repository, model, options = {})
+        Query.new(repository, model, options)
+      end
+
       protected
 
       # Set the serial value of the Resource
@@ -178,7 +208,7 @@ module DataMapper
       #
       # @api semipublic
       def attributes_as_fields(attributes)
-        attributes.map { |property, value| [ property.field, value ] }.to_hash
+        attributes.map { |property, value| [ property.field, property.dump(value) ] }.to_hash
       end
 
       private

@@ -8,7 +8,7 @@
 module DataMapper
   class Query
     class Operator
-      include Extlib::Assertions
+      include DataMapper::Assertions
       extend Equalizer
 
       equalize :target, :operator
@@ -28,10 +28,7 @@ module DataMapper
 
       # @api private
       def initialize(target, operator)
-        assert_kind_of 'operator', operator, Symbol
-
-        @target   = target
-        @operator = operator
+        @target, @operator = target, operator.to_sym
       end
     end # class Operator
   end # class Query

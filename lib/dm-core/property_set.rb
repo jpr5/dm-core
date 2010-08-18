@@ -25,7 +25,7 @@ module DataMapper
 
     # @api semipublic
     def named?(name)
-      @properties.key?(name)
+      @properties.key?(name.to_sym)
     end
 
     # @api semipublic
@@ -68,7 +68,7 @@ module DataMapper
 
     # @api semipublic
     def discriminator
-      @discriminator ||= detect { |property| property.type == Types::Discriminator }
+      @discriminator ||= detect { |property| property.kind_of?(Property::Discriminator) || property.type == Types::Discriminator }
     end
 
     # @api semipublic
@@ -87,7 +87,8 @@ module DataMapper
 
     # @api semipublic
     def get(resource)
-      map { |property| property.get(resource) }
+      return [] if resource.nil?
+      map { |property| resource.__send__(property.name) }
     end
 
     # @api semipublic
@@ -97,7 +98,7 @@ module DataMapper
 
     # @api semipublic
     def set(resource, values)
-      zip(values) { |property, value| property.set(resource, value) }
+      zip(values) { |property, value| resource.__send__("#{property.name}=", value) }
     end
 
     # @api semipublic
@@ -145,6 +146,11 @@ module DataMapper
       end
 
       properties_in_context.flatten.uniq
+    end
+
+    # @api private
+    def field_map
+      map { |property| [ property.field, property ] }.to_hash
     end
 
     private

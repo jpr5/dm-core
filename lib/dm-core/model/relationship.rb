@@ -6,7 +6,7 @@ module DataMapper
     module Relationship
       Model.append_extensions self
 
-      include Extlib::Assertions
+      include DataMapper::Assertions
       extend Chainable
 
       # Initializes relationships hash for extended model
@@ -81,17 +81,13 @@ module DataMapper
       #   cardinality that defines the association type and constraints
       # @param name [Symbol]
       #   the name that the association will be referenced by
-      # @param model [Model, #to_str]
-      #   the target model of the relationship
-      # @param opts [Hash]
-      #   an options hash
+      # @param *args [Model, Hash] model and/or options hash
       #
-      # @option :through[Symbol]  A association that this join should go through to form
+      # @option *args :through[Symbol] A association that this join should go through to form
       #   a many-to-many association
-      # @option :model[Model, String] The name of the class to associate with, if omitted
+      # @option *args :model[Model, String] The name of the class to associate with, if omitted
       #   then the association name is assumed to match the class name
-      # @option :repository[Symbol]
-      #   name of child model repository
+      # @option *args :repository[Symbol] name of child model repository
       #
       # @return [Association::Relationship] the relationship that was
       #   created to reflect either a one-to-one, one-to-many or many-to-many
@@ -101,9 +97,7 @@ module DataMapper
       #
       # @api public
       def has(cardinality, name, *args)
-        assert_kind_of 'cardinality', cardinality, Integer, Range, Infinity.class
-        assert_kind_of 'name',        name,        Symbol
-
+        name    = name.to_sym
         model   = extract_model(args)
         options = extract_options(args)
 
@@ -150,23 +144,18 @@ module DataMapper
       #
       # @param name [Symbol]
       #   the name that the association will be referenced by
-      # @param model [Model, #to_str]
-      #   the target model of the relationship
-      # @param opts [Hash]
-      #   an options hash
+      # @param *args [Model, Hash] model and/or options hash
       #
-      # @option :model[Model, String] The name of the class to associate with, if omitted
+      # @option *args :model[Model, String] The name of the class to associate with, if omitted
       #   then the association name is assumed to match the class name
-      # @option :repository[Symbol]
-      #   name of child model repository
+      # @option *args :repository[Symbol] name of child model repository
       #
       # @return [Association::Relationship] The association created
       #   should not be accessed directly
       #
       # @api public
       def belongs_to(name, *args)
-        assert_kind_of 'name', name, Symbol
-
+        name       = name.to_sym
         model_name = self.name
         model      = extract_model(args)
         options    = extract_options(args)
@@ -236,12 +225,7 @@ module DataMapper
       # @api private
       def extract_options(args)
         options = args.last
-
-        if options.kind_of?(Hash)
-          options.dup
-        else
-          {}
-        end
+        options.respond_to?(:to_hash) ? options.to_hash.dup : {}
       end
 
       # A support method for converting Integer, Range or Infinity values into two
@@ -255,6 +239,8 @@ module DataMapper
           when Integer  then [ cardinality,       cardinality      ]
           when Range    then [ cardinality.first, cardinality.last ]
           when Infinity then [ 0,                 Infinity         ]
+          else
+            assert_kind_of 'options', options, Integer, Range, Infinity.class
         end
       end
 
@@ -273,8 +259,8 @@ module DataMapper
           min = options[:min]
           max = options[:max]
 
-          assert_kind_of 'options[:min]', min, Integer
-          assert_kind_of 'options[:max]', max, Integer, Infinity.class
+          min = min.to_int unless min == Infinity
+          max = max.to_int unless max == Infinity
 
           if min == Infinity && max == Infinity
             raise ArgumentError, 'Cardinality may not be n..n.  The cardinality specifies the min/max number of results from the association'
@@ -288,23 +274,17 @@ module DataMapper
         end
 
         if options.key?(:repository)
-          repository = options[:repository]
-
-          assert_kind_of 'options[:repository]', repository, Repository, Symbol
-
-          if repository.kind_of?(Repository)
-            options[:repository] = repository.name
-          end
+          options[:repository] = options[:repository].to_sym
         end
 
         if options.key?(:class_name)
-          assert_kind_of 'options[:class_name]', options[:class_name], String
+          options[:class_name] = options[:class_name].to_str
           warn "+options[:class_name]+ is deprecated, use :model instead (#{caller_method})"
           options[:model] = options.delete(:class_name)
         end
 
         if options.key?(:remote_name)
-          assert_kind_of 'options[:remote_name]', options[:remote_name], Symbol
+          options[:remote_name] = options[:remote_name].to_sym
           warn "+options[:remote_name]+ is deprecated, use :via instead (#{caller_method})"
           options[:via] = options.delete(:remote_name)
         end
@@ -323,7 +303,7 @@ module DataMapper
         # :target_key (will mean something different for each relationship)
 
         [ :child_key, :parent_key ].each do |key|
-          if options.key?(key) && !options[key].is_a?(Enumerable)
+          if options.key?(key)
             options[key] = Array(options[key])
           end
         end
@@ -340,15 +320,23 @@ module DataMapper
         name        = relationship.name
         reader_name = name.to_s
 
-        return if resource_method_defined?(reader_name)
+        return if method_defined?(reader_name)
 
         reader_visibility = relationship.reader_visibility
 
         class_eval <<-RUBY, __FILE__, __LINE__ + 1
-          #{reader_visibility}                               # public
-          def #{reader_name}(query = nil)                    # def author(query = nil)
-            relationships[#{name.inspect}].get(self, query)  #   relationships[:author].get(self, query)
-          end                                                # end
+          chainable do
+            #{reader_visibility}
+            def #{reader_name}(query = nil)
+              # TODO: when no query is passed in, return the results from
+              #       the ivar directly. This will require that the ivar
+              #       actually hold the resource/collection, and in the case
+              #       of 1:1, the underlying collection is hidden in a
+              #       private ivar, and the resource is in a known ivar
+
+              persisted_state.get(relationships[#{name.inspect}], query)
+            end
+          end
         RUBY
       end
 
@@ -359,15 +347,19 @@ module DataMapper
         name        = relationship.name
         writer_name = "#{name}="
 
-        return if resource_method_defined?(writer_name)
+        return if method_defined?(writer_name)
 
         writer_visibility = relationship.writer_visibility
 
         class_eval <<-RUBY, __FILE__, __LINE__ + 1
-          #{writer_visibility}                                # public
-          def #{writer_name}(target)                          # def author=(target)
-            relationships[#{name.inspect}].set(self, target)  #   relationships[:author].set(self, target)
-          end                                                 # end
+          chainable do
+            #{writer_visibility}
+            def #{writer_name}(target)
+              relationship = relationships[#{name.inspect}]
+              self.persisted_state = persisted_state.set(relationship, target)
+              persisted_state.get(relationship)
+            end
+          end
         RUBY
       end
 

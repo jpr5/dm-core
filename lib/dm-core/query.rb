@@ -26,7 +26,7 @@ module DataMapper
   # Generally Query objects can be found inside Collection objects.
   #
   class Query
-    include Extlib::Assertions
+    include DataMapper::Assertions
     extend Equalizer
 
     OPTIONS = [ :fields, :links, :conditions, :offset, :limit, :order, :unique, :add_reversed, :reload ].to_set.freeze
@@ -106,7 +106,7 @@ module DataMapper
       elsif source.kind_of?(Enumerable)
         key        = model.key(repository.name)
         conditions = Query.target_conditions(source, key, key)
-        Query.new(repository, model, :conditions => conditions)
+        repository.new_query(model, :conditions => conditions)
       else
         raise ArgumentError, "+source+ must respond to #query or be an Enumerable, but was #{source.class}"
       end
@@ -324,10 +324,10 @@ module DataMapper
     # @api semipublic
     def reverse!
       # reverse the sort order
-      @order.map! { |direction| direction.reverse! }
+      @order.map! { |direction| direction.dup.reverse! }
 
       # copy the order to the options
-      @options = @options.merge(:order => @order.map { |direction| direction.dup }).freeze
+      @options = @options.merge(:order => @order).freeze
 
       self
     end
@@ -349,13 +349,12 @@ module DataMapper
     #
     # @api semipublic
     def update(other)
-      assert_kind_of 'other', other, self.class, Hash
-
       other_options = if kind_of?(other.class)
         return self if self.eql?(other)
         assert_valid_other(other)
         other.options
       else
+        other = other.to_hash
         return self if other.empty?
         other
       end
@@ -401,7 +400,7 @@ module DataMapper
     #
     # @api semipublic
     def relative(options)
-      assert_kind_of 'options', options, Hash
+      options = options.to_hash
 
       offset = nil
       limit  = self.limit
@@ -763,7 +762,7 @@ module DataMapper
     #
     # @api private
     def assert_valid_options(options)
-      assert_kind_of 'options', options, Hash
+      options = options.to_hash
 
       options.each do |attribute, value|
         case attribute
@@ -785,7 +784,7 @@ module DataMapper
     #
     # @api private
     def assert_valid_fields(fields, unique)
-      assert_kind_of 'options[:fields]', fields, Array
+      fields = fields.to_ary
 
       model = self.model
 
@@ -814,7 +813,7 @@ module DataMapper
     #
     # @api private
     def assert_valid_links(links)
-      assert_kind_of 'options[:links]', links, Array
+      links = links.to_ary
 
       if links.empty?
         raise ArgumentError, '+options[:links]+ should not be empty'
@@ -854,7 +853,7 @@ module DataMapper
             inspect = subject.inspect
 
             case subject
-              when Symbol, String
+              when Symbol, ::String
                 unless subject.to_s.include?('.') || @properties.named?(subject) || @relationships.key?(subject)
                   raise ArgumentError, "condition #{inspect} does not map to a property or relationship in #{model}"
                 end
@@ -899,7 +898,7 @@ module DataMapper
     # Verifies that query offset is non-negative and only used together with limit
     # @api private
     def assert_valid_offset(offset, limit)
-      assert_kind_of 'options[:offset]', offset, Integer
+      offset = offset.to_int
 
       unless offset >= 0
         raise ArgumentError, "+options[:offset]+ must be greater than or equal to 0, but was #{offset.inspect}"
@@ -917,7 +916,7 @@ module DataMapper
     #
     # @api private
     def assert_valid_limit(limit)
-      assert_kind_of 'options[:limit]', limit, Integer
+      limit = limit.to_int
 
       unless limit >= 0
         raise ArgumentError, "+options[:limit]+ must be greater than or equal to 0, but was #{limit.inspect}"
@@ -1172,22 +1171,12 @@ module DataMapper
       add_condition(condition)
     end
 
-    if RUBY_VERSION >= '1.9'
-      def equality_operator_for_type(bind_value)
-        case bind_value
-          when Enumerable then :in
-          when Regexp     then :regexp
-          else                 :eql
-        end
-      end
-    else
-      def equality_operator_for_type(bind_value)
-        case bind_value
-          when String     then :eql
-          when Enumerable then :in
-          when Regexp     then :regexp
-          else                 :eql
-        end
+    def equality_operator_for_type(bind_value)
+      case bind_value
+        when Model, String then :eql
+        when Enumerable    then :in
+        when Regexp        then :regexp
+        else                    :eql
       end
     end
 
@@ -1418,8 +1407,8 @@ module DataMapper
       {
         :child_key              => keys,
         :parent_key             => keys,
-        :child_repository_name  => repository,
-        :parent_repository_name => repository,
+        :child_repository_name  => repository.name,
+        :parent_repository_name => repository.name,
       }
     end
 

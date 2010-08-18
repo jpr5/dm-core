@@ -340,7 +340,7 @@ module DataMapper
 
         # @api private
         def dump_property(value)
-          subject.value(value)
+          subject.dump(value)
         end
 
         # Returns a value for the comparison +subject+
@@ -385,7 +385,7 @@ module DataMapper
         def record_value_from_hash(hash, subject, key_type)
           hash.fetch subject, case subject
             when Property
-              hash[subject.field]
+              subject.load(hash[subject.field])
             when Associations::Relationship
               subject.send(key_type).map { |property|
                 record_value_from_hash(hash, property, key_type)
@@ -471,8 +471,10 @@ module DataMapper
         #
         # @api semipublic
         def foreign_key_mapping
-          inverse = subject.inverse
-          Query.target_conditions(value, inverse.source_key, inverse.target_key)
+          relationship = subject.inverse
+          relationship = relationship.links.first if relationship.respond_to?(:links)
+
+          Query.target_conditions(value, relationship.source_key, relationship.target_key)
         end
 
         private
@@ -624,7 +626,7 @@ module DataMapper
 
         # @api private
         def valid_range?(range)
-          (!range.empty? || negated?) && valid_for_subject?(range.first) && valid_for_subject?(range.last)
+          (range.any? || negated?) && valid_for_subject?(range.first) && valid_for_subject?(range.last)
         end
 
         # @api private
@@ -697,7 +699,7 @@ module DataMapper
         # @api private
         def dump
           loaded_value = self.loaded_value
-          if subject.respond_to?(:value) && loaded_value.respond_to?(:map) && !loaded_value.kind_of?(Range)
+          if subject.respond_to?(:dump) && loaded_value.respond_to?(:map) && !loaded_value.kind_of?(Range)
             dumped_value = loaded_value.map { |value| dump_property(value) }
             dumped_value.uniq!
             dumped_value
