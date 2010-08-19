@@ -65,9 +65,9 @@ module DataMapper
     # @return [self]
     #
     # @api public
-    def reload(other_query = nil)
+    def reload(other_query = Undefined)
       query = self.query
-      query = other_query.nil? ? query.dup : query.merge(other_query)
+      query = other_query.equal?(Undefined) ? query.dup : query.merge(other_query)
 
       # make sure the Identity Map contains all the existing resources
       identity_map = repository.identity_map(model)
@@ -214,10 +214,8 @@ module DataMapper
     #   Collection scoped by +query+
     #
     # @api public
-    def all(query = nil)
-      # TODO: update this not to accept a nil value, and instead either
-      # accept a Hash/Query and nothing else
-      if query.nil? || (query.kind_of?(Hash) && query.empty?)
+    def all(query = Undefined)
+      if query.equal?(Undefined) || (query.kind_of?(Hash) && query.empty?)
         dup
       else
         # TODO: if there is no order parameter, and the Collection is not loaded

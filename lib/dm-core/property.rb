@@ -354,6 +354,10 @@ module DataMapper
       :default, :repository_name, :allow_nil, :allow_blank, :required
 
     class << self
+      extend Deprecate
+
+      deprecate :all_descendants, :descendants
+
       # @api semipublic
       def determine_class(type)
         if type < DataMapper::Property::Object
@@ -372,7 +376,7 @@ module DataMapper
 
       # @api semipublic
       def find_class(name)
-        klass = all_descendants.find do |descendant|
+        klass = descendants.detect do |descendant|
           DataMapper::Inflector.demodulize(descendant.name) == name
         end
 
@@ -384,29 +388,19 @@ module DataMapper
       end
 
       # @api public
-      def all_descendants
-        descendants + descendants.map do |property|
-          property.all_descendants
-        end.flatten.compact
-      end
-
-      # @api public
       def descendants
-        @descendants ||= []
+        @descendants ||= DescendantSet.new
       end
 
       # @api private
-      def inherited(subclass)
-        add_descendant(subclass)
+      def inherited(descendant)
+        descendants << descendant
 
-        subclass.primitive primitive
-        subclass.accept_options(*accepted_options)
-      end
+        # inherit accepted options
+        descendant.accepted_options.concat(accepted_options)
 
-      # @api private
-      def add_descendant(subclass)
-        descendants << subclass
-        superclass.add_descendant(subclass) if superclass.respond_to?(:add_descendant)
+        # inherit the option values
+        options.each { |key, value| descendant.send(key, value) }
       end
 
       # @api public
@@ -418,24 +412,27 @@ module DataMapper
       def accept_options(*args)
         accepted_options.concat(args)
 
-        # Load Property options
-        accepted_options.each do |property_option|
+        # create methods for each new option
+        args.each do |property_option|
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
-            def self.#{property_option}(*args)                        # def unique(*args)
-              if args.any?                                            #   if args.any?
-                @#{property_option} = args.first                      #     @unique = args.first
-              elsif instance_variable_defined?(:@#{property_option})  #   elsif instance_variable_defined?(:@unique)
-                @#{property_option}                                   #     @unique
-              elsif superclass.respond_to?(:#{property_option})       #   elsif superclass.respond_to?(:unique)
-                superclass.#{property_option}                         #     superclass.unique
-              else                                                    #   else
-                nil                                                   #     nil
-              end                                                     #   end
-            end                                                       # end
+            def self.#{property_option}(value = Undefined)           # def self.unique(value = Undefined)
+              return @#{property_option} if value.equal?(Undefined)  #   return @unique if value.equal?(Undefined)
+              descendants.each do |descendant|                       #   descendants.each do |descendant|
+                descendant.#{property_option}(value)                 #     descendant.unique(value)
+              end                                                    #   end
+              @#{property_option} = value                            #   @unique = value
+            end                                                      # end
           RUBY
         end
 
-        descendants.each {|descendant| descendant.accept_options(*args)}
+        descendants.each { |descendant| descendant.accepted_options.concat(args) }
+      end
+
+      # @api private
+      def nullable(*args)
+        # :required is preferable to :allow_nil, but :nullable maps precisely to :allow_nil
+        warn "#nullable is deprecated, use #required instead (#{caller[0]})"
+        allow_nil(*args)
       end
 
       # Gives all the options set on this type
@@ -446,36 +443,14 @@ module DataMapper
       def options
         options = {}
         accepted_options.each do |method|
-          next if !respond_to?(method) || (value = send(method)).nil?
-          options[method] = value
+          value = send(method)
+          options[method] = send(method) unless value.nil?
         end
         options
       end
-
-      # Ruby primitive type to use as basis for this type. See
-      # Property::PRIMITIVES for list of types.
-      #
-      # @param primitive [Class, nil]
-      #   The class for the primitive. If nil is passed in, it returns the
-      #   current primitive
-      #
-      # @return [Class] if the <primitive> param is nil, return the current primitive.
-      #
-      # @api public
-      def primitive(primitive = nil)
-        return @primitive if primitive.nil?
-        @primitive = primitive
-      end
-
-      # @api private
-      def nullable(value)
-        # :required is preferable to :allow_nil, but :nullable maps precisely to :allow_nil
-        warn "#nullable is deprecated, use #required instead (#{caller[0]})"
-        allow_nil(value)
-      end
     end
 
-    accept_options *Property::OPTIONS
+    accept_options :primitive, *Property::OPTIONS
 
     # A hook to allow types to extend or modify property it's bound to.
     # Implementations are not supposed to modify the state of the type class, and
@@ -489,11 +464,11 @@ module DataMapper
     # @return [String] name of field in data-store
     #
     # @api semipublic
-    def field(repository_name = nil)
+    def field(repository_name = Undefined)
       self_repository_name = self.repository_name
       klass                = self.class
 
-      if repository_name
+      unless repository_name.equal?(Undefined)
         warn "Passing in +repository_name+ to #{klass}#field is deprecated (#{caller[0]})"
 
         if repository_name != self_repository_name
@@ -798,9 +773,9 @@ module DataMapper
 
     # @api semipublic
     def initialize(model, name, options = {}, type = nil)
-      options       = options.to_hash.dup
+      options = options.to_hash.dup
 
-      if type && !self.kind_of?(type)
+      if type && !kind_of?(type)
         warn "#{type} < DataMapper::Type is deprecated, use the new DataMapper::Property API instead (#{caller[2]})"
         @type = type
       end
@@ -902,10 +877,10 @@ module DataMapper
     #
     # @api private
     def determine_visibility
-      default_accessor = @options[:accessor] || :public
+      default_accessor = @options.fetch(:accessor, :public)
 
-      @reader_visibility = @options[:reader] || default_accessor
-      @writer_visibility = @options[:writer] || default_accessor
+      @reader_visibility = @options.fetch(:reader, default_accessor)
+      @writer_visibility = @options.fetch(:writer, default_accessor)
     end
   end # class Property
 end

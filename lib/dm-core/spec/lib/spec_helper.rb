@@ -14,10 +14,10 @@ module DataMapper
     # global model cleanup
     def self.cleanup_models
       descendants = DataMapper::Model.descendants.to_a
-      while model = descendants.shift
-        descendants.concat(model.descendants.to_a - [ model ])
 
+      while model = descendants.shift
         model_name = model.name.to_s.strip
+
         unless model_name.empty? || model_name[0] == ?#
           parts         = model_name.split('::')
           constant_name = parts.pop.to_sym
@@ -31,6 +31,10 @@ module DataMapper
 
         DataMapper::Model.descendants.delete(model)
       end
+
+      unless DataMapper::Model.descendants.empty?
+        raise 'DataMapper::Model.descendants is not empty'
+      end
     end
 
     def self.remove_ivars(object, instance_variables = object.instance_variables)
@@ -42,7 +46,7 @@ module DataMapper
 
         # skip "global" and non-DM objects
         next if object.kind_of?(DataMapper::Logger)                    ||
-                object.kind_of?(DataMapper::Model::DescendantSet)      ||
+                object.kind_of?(DataMapper::DescendantSet)             ||
                 object.kind_of?(DataMapper::Adapters::AbstractAdapter) ||
                 object.class.name[0, 13] == 'DataObjects::'
 
@@ -55,6 +59,10 @@ module DataMapper
         next unless object.instance_variable_defined?(ivar)
 
         value = object.instance_variable_get(ivar)
+
+        # skip descendant sets
+        next if value.kind_of?(DataMapper::DescendantSet)
+
         object.__send__(:remove_instance_variable, ivar) unless object.frozen?
 
         # skip when the value was seen

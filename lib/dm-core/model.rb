@@ -75,7 +75,9 @@ module DataMapper
     #   Set containing the descendant classes
     #
     # @api semipublic
-    attr_reader :descendants
+    def descendants
+      @descendants ||= DescendantSet.new
+    end
 
     # Return if Resource#save should raise an exception on save failures (globally)
     #
@@ -203,35 +205,29 @@ module DataMapper
     end
 
     # @api private
-    def self.extended(model)
-      descendants = self.descendants
+    def self.extended(descendant)
+      descendants << descendant
 
-      descendants << model
+      descendant.instance_variable_set(:@valid,         false)
+      descendant.instance_variable_set(:@base_model,    descendant)
+      descendant.instance_variable_set(:@storage_names, {})
+      descendant.instance_variable_set(:@default_order, {})
 
-      model.instance_variable_set(:@valid,         false)
-      model.instance_variable_set(:@base_model,    model)
-      model.instance_variable_set(:@storage_names, {})
-      model.instance_variable_set(:@default_order, {})
-      model.instance_variable_set(:@descendants,   descendants.class.new(model, descendants))
+      descendant.extend(Chainable)
 
-      model.extend(Chainable)
-
-      extra_extensions.each { |mod| model.extend(mod)         }
-      extra_inclusions.each { |mod| model.send(:include, mod) }
+      extra_extensions.each { |mod| descendant.extend(mod)         }
+      extra_inclusions.each { |mod| descendant.send(:include, mod) }
     end
 
     # @api private
     chainable do
-      def inherited(model)
-        descendants = self.descendants
+      def inherited(descendant)
+        descendants << descendant
 
-        descendants << model
-
-        model.instance_variable_set(:@valid,         false)
-        model.instance_variable_set(:@base_model,    base_model)
-        model.instance_variable_set(:@storage_names, @storage_names.dup)
-        model.instance_variable_set(:@default_order, @default_order.dup)
-        model.instance_variable_set(:@descendants,   descendants.class.new(model, descendants))
+        descendant.instance_variable_set(:@valid,         false)
+        descendant.instance_variable_set(:@base_model,    base_model)
+        descendant.instance_variable_set(:@storage_names, @storage_names.dup)
+        descendant.instance_variable_set(:@default_order, @default_order.dup)
       end
     end
 
@@ -339,10 +335,8 @@ module DataMapper
     # @see Collection
     #
     # @api public
-    def all(query = nil)
-      # TODO: update this not to accept a nil value, and instead either
-      # accept a Hash/Query and nothing else
-      if query.nil? || (query.kind_of?(Hash) && query.empty?)
+    def all(query = Undefined)
+      if query.equal?(Undefined) || (query.kind_of?(Hash) && query.empty?)
         # TODO: after adding Enumerable methods to Model, try to return self here
         new_collection(self.query.dup)
       else
