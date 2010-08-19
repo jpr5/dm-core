@@ -55,9 +55,9 @@ module DataMapper
         #   Comparison.new(:eql, MyClass.properties[:id], 1)
         #
         # @api semipublic
-        def self.new(slug, subject, value)
+        def self.new(slug, subject, value, links = nil)
           if klass = comparison_class(slug)
-            klass.new(subject, value)
+            klass.new(subject, value, links)
           else
             raise ArgumentError, "No Comparison class for #{slug.inspect} has been defined"
           end
@@ -275,6 +275,8 @@ module DataMapper
           parent ? parent.negated? : false
         end
 
+        attr_accessor :links
+
         private
 
         # @api private
@@ -289,10 +291,11 @@ module DataMapper
         #   The value for the comparison.
         #
         # @api semipublic
-        def initialize(subject, value)
+        def initialize(subject, value, links = nil)
           @subject      = subject
           @loaded_value = typecast(value)
           @dumped_value = dump
+          @links        = links
         end
 
         # @api private

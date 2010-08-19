@@ -1091,6 +1091,10 @@ module DataMapper
     #
     # @api private
     def normalize_links
+      # FIXME: Temporarily disabled because this basically filters out the new nested
+      # links structure.
+      return @links.reverse!
+
       stack = @links.dup
 
       @links.clear
@@ -1136,9 +1140,9 @@ module DataMapper
     #   the Query conditions
     #
     # @api private
-    def append_condition(subject, bind_value, model = self.model, operator = :eql)
+    def append_condition(subject, bind_value, model = self.model, operator = :eql, links = nil)
       case subject
-        when Property, Associations::Relationship then append_property_condition(subject, bind_value, operator)
+        when Property, Associations::Relationship then append_property_condition(subject, bind_value, operator, links)
         when Symbol                               then append_symbol_condition(subject, bind_value, model, operator)
         when String                               then append_string_condition(subject, bind_value, model, operator)
         when Operator                             then append_operator_conditions(subject, bind_value, model)
@@ -1149,7 +1153,7 @@ module DataMapper
     end
 
     # @api private
-    def append_property_condition(subject, bind_value, operator)
+    def append_property_condition(subject, bind_value, operator, links = nil)
       negated = operator == :not
 
       if operator == :eql || negated
@@ -1162,7 +1166,7 @@ module DataMapper
         operator = equality_operator_for_type(bind_value)
       end
 
-      condition = Conditions::Comparison.new(operator, subject, bind_value)
+      condition = Conditions::Comparison.new(operator, subject, bind_value, links)
 
       if negated
         condition = Conditions::Operation.new(:not, condition)
@@ -1213,12 +1217,32 @@ module DataMapper
 
     # @api private
     def append_path(path, bind_value, model, operator)
+      # NOTE: The old code (preserved below) made a flat list of links, which fails to
+      # preserve their relationship to each other by the time it gets to dm-do-adapter.
+      # Here instead we maintain the order of the link relationships this specific path
+      # generates, and @links becomes a list of chained (related) links.
+      #
+      # Old code is preserved below.
+
+      links = []
+
       path.relationships.each do |relationship|
         inverse = relationship.inverse
-        @links.unshift(inverse) unless @links.include?(inverse)
+        links << inverse unless links.include?(inverse)
       end
 
-      append_condition(path.property, bind_value, path.model, operator)
+      @links << links if links.any?
+
+=begin
+      path.relationships.each do |relationship|
+        inverse = relationship.inverse
+        links << inverse unless links.include?(inverse)
+      end
+
+      @links.unshift(links) if links.any?
+=end
+
+      append_condition(path.property, bind_value, path.model, operator, links)
     end
 
     # Add a condition to the Query
