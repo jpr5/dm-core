@@ -121,7 +121,7 @@ module DataMapper
             end
           end
 
-          @links.freeze
+          @links = [@links.reverse].freeze
         end
 
         # @api private

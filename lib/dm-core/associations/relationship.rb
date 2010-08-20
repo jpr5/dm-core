@@ -151,6 +151,8 @@ module DataMapper
         repository_name = relative_target_repository_name_for(source)
 
         DataMapper.repository(repository_name).scope do
+          debugger if $DONGS
+
           query = target_model.query.dup
           query.update(self.query)
           query.update(:conditions => source_scope(source))

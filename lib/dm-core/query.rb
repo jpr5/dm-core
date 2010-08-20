@@ -653,6 +653,7 @@ module DataMapper
     #   a subquery for the Query
     #
     # @api private
+    # TODO: ensure links attach to comparison
     def to_subquery
       collection = model.all(merge(:fields => model_key))
       Conditions::Operation.new(:and, Conditions::Comparison.new(:in, self_relationship, collection))
@@ -819,23 +820,25 @@ module DataMapper
         raise ArgumentError, '+options[:links]+ should not be empty'
       end
 
-      links.each do |link|
-        inspect = link.inspect
+      links.each do |path|
+        path.each do |hop|
+          inspect = hop.inspect
 
-        case link
-          when Symbol, String
-            unless @relationships.key?(link.to_sym)
-              raise ArgumentError, "+options[:links]+ entry #{inspect} does not map to a relationship in #{model}"
-            end
+          case hop
+            when Symbol, String
+              unless @relationships.key?(link.to_sym)
+                raise ArgumentError, "+options[:links]+ entry #{inspect} does not map to a relationship in #{model}"
+              end
 
-          when Associations::Relationship
-            # TODO: figure out how to validate links from other models
-            #unless @relationships.value?(link)
-            #  raise ArgumentError, "+options[:links]+ entry #{link.name.inspect} does not map to a relationship in #{model}"
-            #end
+            when Associations::Relationship
+              # TODO: figure out how to validate links from other models
+              #unless @relationships.value?(link)
+              #  raise ArgumentError, "+options[:links]+ entry #{hop.name.inspect} does not map to a relationship in #{model}"
+              #end
 
-          else
-            raise ArgumentError, "+options[:links]+ entry #{inspect} of an unsupported object #{link.class}"
+            else
+              raise ArgumentError, "+options[:links]+ entry #{inspect} of an unsupported object #{hop.class}"
+          end
         end
       end
     end
@@ -1013,9 +1016,11 @@ module DataMapper
             add_condition(condition)
 
           when Hash
+            #debugger if $DONGS
             condition.each { |kv| append_condition(*kv) }
 
           when Array
+            # TODO: ensure that in this case there are comparison.links when necessary
             statement, *bind_values = *condition
             raw_condition = [ statement ]
             raw_condition << bind_values if bind_values.size > 0
@@ -1091,28 +1096,31 @@ module DataMapper
     #
     # @api private
     def normalize_links
-      # FIXME: Temporarily disabled because this basically filters out the new nested
-      # links structure.
-      return @links.reverse!
+      @links.each do |path|
+        # FIXME: Relationship::ManyToMany generates its own :links outside of append_path
+        next if path.frozen?
 
-      stack = @links.dup
+        resolved_path = []
+        stack         = path.dup
+        path.clear
 
-      @links.clear
+        while hop = stack.pop
+          relationship = case hop
+            when Symbol, String             then @relationships[hop]
+            when Associations::Relationship then hop
+          end
 
-      while link = stack.pop
-        relationship = case link
-          when Symbol, String             then @relationships[link]
-          when Associations::Relationship then link
+          if relationship.respond_to?(:links)
+            stack.concat(relationship.links)
+          elsif !resolved_path.include?(relationship)
+            resolved_path << relationship
+          end
         end
 
-        if relationship.respond_to?(:links)
-          stack.concat(relationship.links)
-        elsif !@links.include?(relationship)
-          @links << relationship
-        end
+        path.replace(resolved_path.reverse)
       end
 
-      @links.reverse!
+      @links
     end
 
     # Normalize the unique attribute
@@ -1232,15 +1240,6 @@ module DataMapper
       end
 
       @links << links if links.any?
-
-=begin
-      path.relationships.each do |relationship|
-        inverse = relationship.inverse
-        links << inverse unless links.include?(inverse)
-      end
-
-      @links.unshift(links) if links.any?
-=end
 
       append_condition(path.property, bind_value, path.model, operator, links)
     end
