@@ -7,19 +7,19 @@ module DataMapper
         OPTIONS = superclass::OPTIONS.dup << :required << :key
 
         # @api semipublic
-        alias source_repository_name child_repository_name
+        alias_method :source_repository_name, :child_repository_name
 
         # @api semipublic
-        alias source_model child_model
+        alias_method :source_model, :child_model
 
         # @api semipublic
-        alias target_repository_name parent_repository_name
+        alias_method :target_repository_name, :parent_repository_name
 
         # @api semipublic
-        alias target_model parent_model
+        alias_method :target_model, :parent_model
 
         # @api semipublic
-        alias target_key parent_key
+        alias_method :target_key, :parent_key
 
         # @api semipublic
         def required?
@@ -55,8 +55,7 @@ module DataMapper
             properties[property_name] || begin
               # create the property within the correct repository
               DataMapper.repository(repository_name) do
-                type = parent_property.send(parent_property.type == DataMapper::Property::Boolean ? :type : :primitive)
-                model.property(property_name, type, child_key_options(parent_property))
+                model.property(property_name, parent_property.to_child_key, child_key_options(parent_property))
               end
             end
           end
@@ -65,7 +64,7 @@ module DataMapper
         end
 
         # @api semipublic
-        alias source_key child_key
+        alias_method :source_key, :child_key
 
         # Returns a hash of conditions that scopes query that fetches
         # target object
