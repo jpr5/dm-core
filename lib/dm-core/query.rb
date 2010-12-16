@@ -486,10 +486,10 @@ module DataMapper
     #
     # @api semipublic
     def filter_records(records)
-      records = records.uniq if unique?
-      records = match_records(records)
-      records = sort_records(records)
-      records = limit_records(records)
+      records = records.uniq           if unique?
+      records = match_records(records) if conditions
+      records = sort_records(records)  if order
+      records = limit_records(records) if limit || offset > 0
       records
     end
 
@@ -504,7 +504,6 @@ module DataMapper
     # @api semipublic
     def match_records(records)
       conditions = self.conditions
-      return records if conditions.nil?
       records.select { |record| conditions.matches?(record) }
     end
 
@@ -530,7 +529,7 @@ module DataMapper
     # Limits a set of records by the offset and/or limit
     #
     # @param [Enumerable] records
-    #   A list of Recrods to sort
+    #   A list of records to sort
     #
     # @return [Enumerable]
     #   The offset & limited records
@@ -789,22 +788,26 @@ module DataMapper
 
       model = self.model
 
-      fields.each do |field|
-        inspect = field.inspect
+      valid_properties = model.properties
 
+      model.descendants.each do |descendant|
+        valid_properties += descendant.properties
+      end
+
+      fields.each do |field|
         case field
           when Symbol, String
-            unless @properties.named?(field)
-              raise ArgumentError, "+options[:fields]+ entry #{inspect} does not map to a property in #{model}"
+            unless valid_properties.named?(field)
+              raise ArgumentError, "+options[:fields]+ entry #{field.inspect} does not map to a property in #{model}"
             end
 
           when Property
-            unless @properties.include?(field)
+            unless valid_properties.include?(field)
               raise ArgumentError, "+options[:field]+ entry #{field.name.inspect} does not map to a property in #{model}"
             end
 
           else
-            raise ArgumentError, "+options[:fields]+ entry #{inspect} of an unsupported object #{field.class}"
+            raise ArgumentError, "+options[:fields]+ entry #{field.inspect} of an unsupported object #{field.class}"
         end
       end
     end
@@ -822,12 +825,10 @@ module DataMapper
 
       links.each do |path|
         path.each do |hop|
-          inspect = hop.inspect
-
           case hop
             when Symbol, String
               unless @relationships.key?(link.to_sym)
-                raise ArgumentError, "+options[:links]+ entry #{inspect} does not map to a relationship in #{model}"
+                raise ArgumentError, "+options[:links]+ entry #{hop.inspect} does not map to a relationship in #{model}"
               end
 
             when Associations::Relationship
@@ -837,7 +838,7 @@ module DataMapper
               #end
 
             else
-              raise ArgumentError, "+options[:links]+ entry #{inspect} of an unsupported object #{hop.class}"
+              raise ArgumentError, "+options[:links]+ entry #{hop.inspect} of an unsupported object #{hop.class}"
           end
         end
       end
@@ -853,19 +854,17 @@ module DataMapper
       case conditions
         when Hash
           conditions.each do |subject, bind_value|
-            inspect = subject.inspect
-
             case subject
               when Symbol, ::String
                 unless subject.to_s.include?('.') || @properties.named?(subject) || @relationships.key?(subject)
-                  raise ArgumentError, "condition #{inspect} does not map to a property or relationship in #{model}"
+                  raise ArgumentError, "condition #{subject.inspect} does not map to a property or relationship in #{model}"
                 end
 
               when Operator
                 operator = subject.operator
 
                 unless (Conditions::Comparison.slugs | [ :not ]).include?(operator)
-                  raise ArgumentError, "condition #{inspect} used an invalid operator #{operator}"
+                  raise ArgumentError, "condition #{subject.inspect} used an invalid operator #{operator}"
                 end
 
                 assert_valid_conditions(subject.target => bind_value)
@@ -881,7 +880,7 @@ module DataMapper
                 #end
 
               else
-                raise ArgumentError, "condition #{inspect} of an unsupported object #{subject.class}"
+                raise ArgumentError, "condition #{subject.inspect} of an unsupported object #{subject.class}"
             end
           end
 
@@ -941,12 +940,10 @@ module DataMapper
       model = self.model
 
       order.each do |order_entry|
-        inspect = order_entry.inspect
-
         case order_entry
           when Symbol, String
             unless @properties.named?(order_entry)
-              raise ArgumentError, "+options[:order]+ entry #{inspect} does not map to a property in #{model}"
+              raise ArgumentError, "+options[:order]+ entry #{order_entry.inspect} does not map to a property in #{model}"
             end
 
           when Property
@@ -958,13 +955,13 @@ module DataMapper
             operator = order_entry.operator
 
             unless operator == :asc || operator == :desc
-              raise ArgumentError, "+options[:order]+ entry #{inspect} used an invalid operator #{operator}"
+              raise ArgumentError, "+options[:order]+ entry #{order_entry.inspect} used an invalid operator #{operator}"
             end
 
             assert_valid_order([ order_entry.target ], fields)
 
           else
-            raise ArgumentError, "+options[:order]+ entry #{inspect} of an unsupported object #{order_entry.class}"
+            raise ArgumentError, "+options[:order]+ entry #{order_entry.inspect} of an unsupported object #{order_entry.class}"
         end
       end
     end
@@ -1379,7 +1376,18 @@ module DataMapper
     #
     # @api private
     def other_conditions(other, operation)
-      query_conditions(self).send(operation, query_conditions(other))
+      self_conditions = query_conditions(self)
+
+      unless self_conditions.kind_of?(Conditions::Operation)
+        operation_slug = case operation
+                         when :intersection, :difference then :and
+                         when :union                     then :or
+                         end
+
+        self_conditions = Conditions::Operation.new(operation_slug, self_conditions)
+      end
+
+      self_conditions.send(operation, query_conditions(other))
     end
 
     # Extract conditions from a Query

@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["Dan Kubb"]
-  s.date = %q{2010-09-07}
+  s.date = %q{2010-11-25}
   s.description = %q{Faster, Better, Simpler.}
   s.email = %q{dan.kubb@gmail.com}
   s.extra_rdoc_files = [
@@ -99,6 +99,7 @@ Gem::Specification.new do |s|
      "lib/dm-core/spec/shared/resource_spec.rb",
      "lib/dm-core/spec/shared/sel_spec.rb",
      "lib/dm-core/spec/shared/semipublic/property_spec.rb",
+     "lib/dm-core/spec/shared/semipublic/query/conditions/abstract_comparison_spec.rb",
      "lib/dm-core/support/assertions.rb",
      "lib/dm-core/support/chainable.rb",
      "lib/dm-core/support/deprecate.rb",
@@ -209,8 +210,6 @@ Gem::Specification.new do |s|
      "spec/unit/object_spec.rb",
      "spec/unit/try_dup_spec.rb",
      "tasks/ci.rake",
-     "tasks/local_gemfile.rake",
-     "tasks/metrics.rake",
      "tasks/spec.rake",
      "tasks/yard.rake",
      "tasks/yardstick.rake"
