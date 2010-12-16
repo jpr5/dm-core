@@ -52,8 +52,11 @@ module DataMapper
 
       def require_plugins
         plugins = ENV['PLUGINS'] || ENV['PLUGIN']
-        plugins = plugins.to_s.split(/[,\s]+/).push('dm-migrations').uniq
-        plugins.each { |plugin| require plugin }
+        plugins = plugins.to_s.split(/[,\s]+/)
+        unless ENV['ADAPTER'] == 'in_memory'
+          plugins.push('dm-migrations')
+        end
+        plugins.uniq.each { |plugin| require plugin }
       end
 
       def spec_adapters
@@ -96,7 +99,7 @@ module DataMapper
           @adapter ||= setup!
         end
 
-        alias :setup :adapter
+        alias_method :setup, :adapter
 
         def setup!
           adapter = DataMapper.setup(name, connection_uri)
@@ -111,7 +114,7 @@ module DataMapper
         end
 
         def connection_uri
-          "#{adapter_name}://#{username}:#{password}@localhost/#{storage_name}"
+          "#{adapter_name}://#{username}:#{password}@#{host}/#{storage_name}"
         end
 
         def storage_name
@@ -127,11 +130,15 @@ module DataMapper
         end
 
         def username
-          'datamapper'
+          ENV.fetch('DM_DB_USER', 'datamapper')
         end
 
         def password
-          'datamapper'
+          ENV.fetch('DM_DB_PASSWORD', 'datamapper')
+        end
+
+        def host
+          ENV.fetch('DM_DB_HOST', 'localhost')
         end
 
         # Test the connection

@@ -5,11 +5,11 @@
 
 Gem::Specification.new do |s|
   s.name = %q{dm-core}
-  s.version = "1.0.0"
+  s.version = "1.0.2"
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["Dan Kubb"]
-  s.date = %q{2010-08-18}
+  s.date = %q{2010-11-25}
   s.description = %q{Faster, Better, Simpler.}
   s.email = %q{dan.kubb@gmail.com}
   s.extra_rdoc_files = [
@@ -99,6 +99,7 @@ Gem::Specification.new do |s|
      "lib/dm-core/spec/shared/resource_spec.rb",
      "lib/dm-core/spec/shared/sel_spec.rb",
      "lib/dm-core/spec/shared/semipublic/property_spec.rb",
+     "lib/dm-core/spec/shared/semipublic/query/conditions/abstract_comparison_spec.rb",
      "lib/dm-core/support/assertions.rb",
      "lib/dm-core/support/chainable.rb",
      "lib/dm-core/support/deprecate.rb",
@@ -125,6 +126,7 @@ Gem::Specification.new do |s|
      "spec/public/associations/many_to_many_spec.rb",
      "spec/public/associations/many_to_one_spec.rb",
      "spec/public/associations/many_to_one_with_boolean_cpk_spec.rb",
+     "spec/public/associations/many_to_one_with_custom_fk_spec.rb",
      "spec/public/associations/one_to_many_spec.rb",
      "spec/public/associations/one_to_one_spec.rb",
      "spec/public/associations/one_to_one_with_boolean_cpk_spec.rb",
@@ -208,12 +210,11 @@ Gem::Specification.new do |s|
      "spec/unit/object_spec.rb",
      "spec/unit/try_dup_spec.rb",
      "tasks/ci.rake",
-     "tasks/local_gemfile.rake",
-     "tasks/metrics.rake",
      "tasks/spec.rake",
      "tasks/yard.rake",
      "tasks/yardstick.rake"
   ]
+  s.has_rdoc = %q{yard}
   s.homepage = %q{http://github.com/datamapper/dm-core}
   s.rdoc_options = ["--charset=UTF-8"]
   s.require_paths = ["lib"]
@@ -226,6 +227,7 @@ Gem::Specification.new do |s|
      "spec/public/associations/many_to_many_spec.rb",
      "spec/public/associations/many_to_one_spec.rb",
      "spec/public/associations/many_to_one_with_boolean_cpk_spec.rb",
+     "spec/public/associations/many_to_one_with_custom_fk_spec.rb",
      "spec/public/associations/one_to_many_spec.rb",
      "spec/public/associations/one_to_one_spec.rb",
      "spec/public/associations/one_to_one_with_boolean_cpk_spec.rb",
@@ -314,18 +316,18 @@ Gem::Specification.new do |s|
 
     if Gem::Version.new(Gem::VERSION) >= Gem::Version.new('1.2.0') then
       s.add_runtime_dependency(%q<extlib>, ["~> 0.9.15"])
-      s.add_runtime_dependency(%q<addressable>, ["~> 2.1"])
+      s.add_runtime_dependency(%q<addressable>, ["~> 2.2"])
       s.add_development_dependency(%q<rspec>, ["~> 1.3"])
       s.add_development_dependency(%q<jeweler>, ["~> 1.4"])
     else
       s.add_dependency(%q<extlib>, ["~> 0.9.15"])
-      s.add_dependency(%q<addressable>, ["~> 2.1"])
+      s.add_dependency(%q<addressable>, ["~> 2.2"])
       s.add_dependency(%q<rspec>, ["~> 1.3"])
       s.add_dependency(%q<jeweler>, ["~> 1.4"])
     end
   else
     s.add_dependency(%q<extlib>, ["~> 0.9.15"])
-    s.add_dependency(%q<addressable>, ["~> 2.1"])
+    s.add_dependency(%q<addressable>, ["~> 2.2"])
     s.add_dependency(%q<rspec>, ["~> 1.3"])
     s.add_dependency(%q<jeweler>, ["~> 1.4"])
   end

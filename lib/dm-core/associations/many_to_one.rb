@@ -7,19 +7,19 @@ module DataMapper
         OPTIONS = superclass::OPTIONS.dup << :required << :key
 
         # @api semipublic
-        alias source_repository_name child_repository_name
+        alias_method :source_repository_name, :child_repository_name
 
         # @api semipublic
-        alias source_model child_model
+        alias_method :source_model, :child_model
 
         # @api semipublic
-        alias target_repository_name parent_repository_name
+        alias_method :target_repository_name, :parent_repository_name
 
         # @api semipublic
-        alias target_model parent_model
+        alias_method :target_model, :parent_model
 
         # @api semipublic
-        alias target_key parent_key
+        alias_method :target_key, :parent_key
 
         # @api semipublic
         def required?
@@ -55,8 +55,7 @@ module DataMapper
             properties[property_name] || begin
               # create the property within the correct repository
               DataMapper.repository(repository_name) do
-                type = parent_property.send(parent_property.type == DataMapper::Property::Boolean ? :type : :primitive)
-                model.property(property_name, type, child_key_options(parent_property))
+                model.property(property_name, parent_property.to_child_key, child_key_options(parent_property))
               end
             end
           end
@@ -65,7 +64,7 @@ module DataMapper
         end
 
         # @api semipublic
-        alias source_key child_key
+        alias_method :source_key, :child_key
 
         # Returns a hash of conditions that scopes query that fetches
         # target object
@@ -96,10 +95,18 @@ module DataMapper
         def resource_for(source, other_query = nil)
           query = query_for(source, other_query)
 
-          # TODO: lookup the resource in the Identity Map, and make sure
-          # it matches the query criteria, otherwise perform the query
-
-          target_model.first(query)
+          # If the target key is equal to the model key, we can use the
+          # Model#get so the IdentityMap is used
+          if target_key == target_model.key
+            target = target_model.get(*source_key.get!(source))
+            if query.conditions.matches?(target)
+              target
+            else
+              nil
+            end
+          else
+            target_model.first(query)
+          end
         end
 
         # Loads and returns association target (ex.: author) for given source resource
@@ -128,7 +135,7 @@ module DataMapper
         # @param source [DataMapper::Resource]
         #   Child object (ex.: instance of article)
         #
-        # @param source [DataMapper::Resource]
+        # @param target [DataMapper::Resource]
         #   Parent object (ex.: instance of author)
         #
         # @api semipublic
@@ -156,8 +163,7 @@ module DataMapper
           return if loaded?(source) || !valid_source?(source)
 
           # SEL: load all related resources in the source collection
-          collection = source.collection
-          if source.saved? && collection.size > 1
+          if source.saved? && (collection = source.collection).size > 1
             eager_load(collection)
           end
 

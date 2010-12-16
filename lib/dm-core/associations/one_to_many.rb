@@ -3,19 +3,19 @@ module DataMapper
     module OneToMany #:nodoc:
       class Relationship < Associations::Relationship
         # @api semipublic
-        alias target_repository_name child_repository_name
+        alias_method :target_repository_name, :child_repository_name
 
         # @api semipublic
-        alias target_model child_model
+        alias_method :target_model, :child_model
 
         # @api semipublic
-        alias source_repository_name parent_repository_name
+        alias_method :source_repository_name, :parent_repository_name
 
         # @api semipublic
-        alias source_model parent_model
+        alias_method :source_model, :parent_model
 
         # @api semipublic
-        alias source_key parent_key
+        alias_method :source_key, :parent_key
 
         # @api semipublic
         def child_key
@@ -23,7 +23,7 @@ module DataMapper
         end
 
         # @api semipublic
-        alias target_key child_key
+        alias_method :target_key, :child_key
 
         # Returns a Collection for this relationship with a given source
         #
@@ -91,8 +91,7 @@ module DataMapper
           return if loaded?(source)
 
           # SEL: load all related resources in the source collection
-          collection = source.collection
-          if source.saved? && collection.size > 1
+          if source.saved? && (collection = source.collection).size > 1
             eager_load(collection)
           end
 

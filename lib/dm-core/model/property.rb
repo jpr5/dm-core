@@ -1,6 +1,3 @@
-# TODO: move paranoid property concerns to a ParanoidModel that is mixed
-# into Model when a Paranoid property is used
-
 # TODO: update Model#respond_to? to return true if method_method missing
 # would handle the message
 
@@ -14,14 +11,12 @@ module DataMapper
       def self.extended(model)
         model.instance_variable_set(:@properties,               {})
         model.instance_variable_set(:@field_naming_conventions, {})
-        model.instance_variable_set(:@paranoid_properties,      {})
       end
 
       chainable do
         def inherited(model)
           model.instance_variable_set(:@properties,               {})
           model.instance_variable_set(:@field_naming_conventions, @field_naming_conventions.dup)
-          model.instance_variable_set(:@paranoid_properties,      @paranoid_properties.dup)
 
           @properties.each do |repository_name, properties|
             model_properties = model.properties(repository_name)
@@ -76,11 +71,11 @@ module DataMapper
         # Add property to the other mappings as well if this is for the default
         # repository.
         if repository_name == default_repository_name
-          @properties.except(repository_name).each do |repository_name, properties|
+          @properties.except(default_repository_name).each do |other_repository_name, properties|
             next if properties.named?(name)
 
             # make sure the property is created within the correct repository scope
-            DataMapper.repository(repository_name) do
+            DataMapper.repository(other_repository_name) do
               properties << klass.new(self, name, options, type)
             end
           end
@@ -109,7 +104,8 @@ module DataMapper
         create_reader_for(property)
         create_writer_for(property)
 
-        property
+        # FIXME: explicit return needed for YARD to parse this properly
+        return property
       end
 
       # Gets a list of all properties that have been defined on this Model in
@@ -181,16 +177,6 @@ module DataMapper
         end
 
         properties
-      end
-
-      # @api private
-      def paranoid_properties
-        @paranoid_properties
-      end
-
-      # @api private
-      def set_paranoid_property(name, &block)
-        paranoid_properties[name] = block
       end
 
       # @api private
