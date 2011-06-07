@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', 'spec_helper'))
+require 'spec_helper'
 
 # instance methods
 describe DataMapper::Property do
@@ -21,12 +21,15 @@ describe DataMapper::Property do
       end
     end
 
-    describe "with custom types" do
+    describe "with property subclasses" do
       before :all do
+        Object.send(:remove_const, :CustomProps) if Object.const_defined?(:CustomProps)
+
         module ::CustomProps
-          class Property
-            class Hash  < DataMapper::Property::Object; end
-            class Other < DataMapper::Property::Object; end
+          module Property
+            class Hash   < DataMapper::Property::Object; end
+            class Other  < DataMapper::Property::Object; end
+            class Serial < DataMapper::Property::Object; end
           end
         end
       end
@@ -42,6 +45,28 @@ describe DataMapper::Property do
 
         it { subject.should be(::CustomProps::Property::Other) }
       end
+
+      describe "should always use the DM property when a built-in is referenced indirectly" do
+        subject do
+          Class.new do
+            extend ::DataMapper::Model
+          end
+        end
+
+        it { subject::Serial.should be(::DataMapper::Property::Serial) }
+      end
+
+      describe "should always use the custom property when an overridden built-in is directly attached to the model" do
+        subject do
+          Class.new do
+            extend ::DataMapper::Model
+            include ::CustomProps::Property
+          end
+        end
+
+        it { subject::Serial.should be(::CustomProps::Property::Serial) }
+      end
+
     end
   end
 
@@ -53,7 +78,7 @@ describe DataMapper::Property do
         property :id,         Integer, :key => true
         property :name,       String
         property :rating,     Float
-        property :rate,       Decimal
+        property :rate,       Decimal, :precision => 5, :scale => 2
         property :type,       Class
         property :alias,      String
         property :active,     Boolean
@@ -68,7 +93,7 @@ describe DataMapper::Property do
   end
 
   describe 'override property definition in other repository' do
-    before(:all) do
+    before :all do
       module ::Blog
         class Author
           repository(:other) do

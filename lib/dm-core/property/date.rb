@@ -1,5 +1,3 @@
-require 'dm-core/property/typecast/time'
-
 module DataMapper
   class Property
     class Date < Object
@@ -11,7 +9,7 @@ module DataMapper
       # Typecasts an arbitrary value to a Date
       # Handles both Hashes and Date instances.
       #
-      # @param [#to_mash, #to_s] value
+      # @param [Hash, #to_mash, #to_s] value
       #   value to be typecast
       #
       # @return [Date]
@@ -21,7 +19,7 @@ module DataMapper
       def typecast_to_primitive(value)
         if value.respond_to?(:to_date)
           value.to_date
-        elsif value.respond_to?(:to_mash)
+        elsif value.is_a?(::Hash) || value.respond_to?(:to_mash)
           typecast_hash_to_date(value)
         else
           ::Date.parse(value.to_s)
@@ -32,7 +30,7 @@ module DataMapper
 
       # Creates a Date instance from a Hash with keys :year, :month, :day
       #
-      # @param [#to_mash] value
+      # @param [Hash, #to_mash] value
       #   value to be typecast
       #
       # @return [Date]

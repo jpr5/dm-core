@@ -4,7 +4,7 @@ module DataMapper
       # Relationship class with implementation specific
       # to n side of 1 to n association
       class Relationship < Associations::Relationship
-        OPTIONS = superclass::OPTIONS.dup << :required << :key
+        OPTIONS = superclass::OPTIONS.dup << :required << :key << :unique
 
         # @api semipublic
         alias_method :source_repository_name, :child_repository_name
@@ -31,11 +31,14 @@ module DataMapper
           @key
         end
 
-        # @api private
+        # @api semipublic
+        def unique?
+          !!@unique
+        end
+
+        # @deprecated
         def nullable?
-          klass = self.class
-          warn "#{klass}#nullable? is deprecated, use #{klass}#required? instead (#{caller[0]})"
-          !required?
+          raise "#{self.class}#nullable? is deprecated, use #{self.class}#required? instead (#{caller.first})"
         end
 
         # Returns a set of keys that identify source model
@@ -120,8 +123,13 @@ module DataMapper
         # @api semipublic
         def get(source, query = nil)
           lazy_load(source)
-          collection = get_collection(source)
-          collection.first(query) if collection
+
+          if query
+            collection = get_collection(source)
+            collection.first(query) if collection
+          else
+            get!(source)
+          end
         end
 
         def get_collection(source)
@@ -185,14 +193,12 @@ module DataMapper
         # @api semipublic
         def initialize(name, source_model, target_model, options = {})
           if options.key?(:nullable)
-            nullable_options = options.only(:nullable)
-            required_options = { :required => !options.delete(:nullable) }
-            warn "#{nullable_options.inspect} is deprecated, use #{required_options.inspect} instead (#{caller[2]})"
-            options.update(required_options)
+            raise ":nullable is deprecated, use :required instead (#{caller[2]})"
           end
 
           @required      = options.fetch(:required, true)
           @key           = options.fetch(:key,      false)
+          @unique        = options.fetch(:unique,   false)
           target_model ||= DataMapper::Inflector.camelize(name)
           options        = { :min => @required ? 1 : 0, :max => 1 }.update(options)
           super
@@ -234,15 +240,22 @@ module DataMapper
         #
         # @api private
         def inverse_name
-          super || DataMapper::Inflector.underscore(DataMapper::Inflector.demodulize(source_model.name)).pluralize.to_sym
+          name = super
+          return name if name
+
+          name = DataMapper::Inflector.demodulize(source_model.name)
+          name = DataMapper::Inflector.underscore(name)
+          name = DataMapper::Inflector.pluralize(name)
+          name.to_sym
         end
 
         # @api private
         def source_key_options(target_property)
-          options = target_property.options.only(:length, :precision, :scale).update(
+          options = DataMapper::Ext::Hash.only(target_property.options, :length, :precision, :scale).update(
             :index    => name,
             :required => required?,
-            :key      => key?
+            :key      => key?,
+            :unique   => @unique
           )
 
           if target_property.primitive == Integer

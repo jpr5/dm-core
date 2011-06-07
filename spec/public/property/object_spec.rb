@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', '..', 'spec_helper'))
+require 'spec_helper'
 
 describe DataMapper::Property, 'Object type' do
   before :all do
@@ -31,7 +31,7 @@ describe DataMapper::Property, 'Object type' do
     it { should equal(@value) }
   end
 
-  it { should respond_to(:value) }
+  it { should respond_to(:dump) }
 
   describe '#dump' do
     describe 'with a value' do

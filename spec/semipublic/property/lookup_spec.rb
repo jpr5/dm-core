@@ -1,13 +1,11 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '../..', 'spec_helper'))
+require 'spec_helper'
 require 'dm-core/property/lookup'
 
 describe DataMapper::Property::Lookup do
   supported_by :all do
-    before(:all) do
+    before :all do
       Object.send(:remove_const, :Foo) if defined?(Foo)
       @klass = Class.new { extend DataMapper::Model }
-
-      DataMapper::Types::LegacyType = Class.new(DataMapper::Types::Text)
 
       module Foo
         class OtherProperty < DataMapper::Property::String; end
@@ -20,10 +18,6 @@ describe DataMapper::Property::Lookup do
 
     it "should provide access to Property classes from outside of the Property namespace" do
       @klass::OtherProperty.should be(Foo::OtherProperty)
-    end
-
-    it "should provide access to legacy Types" do
-      @klass::LegacyType.should be(DataMapper::Types::LegacyType)
     end
 
     it "should not provide access to unknown Property classes" do

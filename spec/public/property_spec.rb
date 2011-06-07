@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-require File.expand_path(File.join(File.dirname(__FILE__), '..', 'spec_helper'))
+require 'spec_helper'
 
 # instance methods
 describe DataMapper::Property do
@@ -39,12 +39,6 @@ describe DataMapper::Property do
       it 'returns field for specific repository when it is present'
 
       it 'sets field value using field naming convention on first reference'
-    end
-
-    describe '#custom?' do
-      it 'is true for custom type fields (not provided by dm-core)'
-
-      it 'is false for core type fields (provided by dm-core)'
     end
 
     describe '#default_for' do
@@ -104,10 +98,6 @@ describe DataMapper::Property do
     describe '#initialize' do
       describe 'when tracking strategy is explicitly given' do
         it 'uses tracking strategy from options'
-      end
-
-      describe 'when custom type has tracking stragegy' do
-        it 'uses tracking strategy from type'
       end
     end
 

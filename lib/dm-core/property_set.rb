@@ -3,61 +3,28 @@ module DataMapper
   # queries with set of fields it performed over,
   # to represent composite keys (esp. for associations)
   # and so on.
-  class PropertySet
-    extend Deprecate
+  class PropertySet < SubjectSet
     include Enumerable
 
-    deprecate :has_property?, :named?
-    deprecate :slice,         :values_at
-    deprecate :add,           :<<
-
-    # @api semipublic
-    def [](name)
-      @properties[name]
-    end
-
-    # @api semipublic
-    def []=(name, property)
-      raise "Property is not added with the correct name" unless name == property.name
-      add_property(property)
-    end
-
-    # @api semipublic
-    def named?(name)
-      @properties.key?(name.to_sym)
-    end
-
-    # @api semipublic
-    def values_at(*names)
-      @properties.values_at(*names)
-    end
-
-    # @api semipublic
     def <<(property)
-      add_property(property)
+      clear_cache
+      super
     end
 
+    # Make sure that entry is part of this PropertySet
+    #
+    # @param [#to_s] name
+    # @param [#name] entry
+    #
+    # @return [#name]
+    #   the entry that is now part of this PropertySet
+    #
     # @api semipublic
-    def include?(property)
-      named?(property.name)
-    end
-
-    def each
-      @order.each do |p|
-        yield p
-      end
-    end
-
-    def to_a
-      @order
-    end
-
-    def to_ary
-      to_a
-    end
-
-    def size
-      @properties.size
+    def []=(name, entry)
+      warn "#{self.class}#[]= is deprecated. Use #{self.class}#<< instead: #{caller.first}"
+      raise "#{entry.class} is not added with the correct name" unless name && name.to_s == entry.name.to_s
+      self << entry
+      entry
     end
 
     def |(other)
@@ -80,16 +47,6 @@ module DataMapper
       to_a == other.to_a
     end
 
-    # @api semipublic
-    def empty?
-      @properties.empty?
-    end
-
-    # @api semipublic
-    def index(property)
-      each_index { |index| break index if at(index).name == property.name }
-    end
-
     # TODO: make PropertySet#reject return a PropertySet instance
     # @api semipublic
     def defaults
@@ -103,7 +60,7 @@ module DataMapper
 
     # @api semipublic
     def discriminator
-      @discriminator ||= detect { |property| property.kind_of?(Property::Discriminator) || property.type == Types::Discriminator }
+      @discriminator ||= detect { |property| property.kind_of?(Property::Discriminator) }
     end
 
     # @api semipublic
@@ -185,7 +142,7 @@ module DataMapper
 
     # @api private
     def field_map
-      map { |property| [ property.field, property ] }.to_hash
+      Hash[ map { |property| [ property.field, property ] } ]
     end
 
     def inspect
@@ -193,28 +150,6 @@ module DataMapper
     end
 
     private
-
-    # @api semipublic
-    def initialize(args = [])
-      @order      = []
-      @properties = args.map do |property|
-        @order << property
-        [ property.name, property ]
-      end.to_mash
-    end
-
-    # @api private
-    def initialize_copy(*)
-      @order      = @order.dup
-      @properties = @properties.dup
-    end
-
-    # @api private
-    def add_property(property)
-      clear_cache
-      @order << property unless @order.include?(property)
-      @properties[property.name] = property
-    end
 
     # @api private
     def clear_cache

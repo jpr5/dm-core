@@ -17,10 +17,6 @@ module DataMapper
   # A Collection is typically returned by the Model#all
   # method.
   class Collection < LazyArray
-    extend Deprecate
-
-    deprecate :add,   :<<
-    deprecate :build, :new
 
     # Returns the Query the Collection is scoped with
     #
@@ -734,6 +730,11 @@ module DataMapper
       super
     end
 
+    # Determines whether the collection is empty.
+    #
+    # @api public
+    alias_method :blank?, :empty?
+
     # Finds the first Resource by conditions, or initializes a new
     # Resource with the attributes if none found
     #
@@ -941,7 +942,7 @@ module DataMapper
     #
     # @api public
     def respond_to?(method, include_private = false)
-      super || model.respond_to?(method) || relationships.key?(method)
+      super || model.respond_to?(method) || relationships.named?(method)
     end
 
     # Checks if all the resources have no changes to save
@@ -977,7 +978,7 @@ module DataMapper
 
     # @api semipublic
     def hash
-      query.hash
+      self.class.hash ^ query.hash
     end
 
     protected
@@ -1265,7 +1266,7 @@ module DataMapper
           subject = condition.subject
           next unless model_properties.include?(subject) || (condition.relationship? && subject.source_model == model)
 
-          default_attributes[subject] = condition.value
+          default_attributes[subject] = condition.loaded_value
         end
       end
 
@@ -1441,7 +1442,7 @@ module DataMapper
 
       if model.respond_to?(method)
         delegate_to_model(method, *args, &block)
-      elsif relationship = relationships[method] || relationships[method.to_s.singularize.to_sym]
+      elsif relationship = relationships[method] || relationships[DataMapper::Inflector.singularize(method.to_s).to_sym]
         delegate_to_relationship(relationship, *args)
       else
         super

@@ -1,3 +1,4 @@
+require 'spec_helper'
 require 'dm-core/support/lazy_array'
 
 # only needed for specs
@@ -5,15 +6,15 @@ require 'dm-core/support/lazy_array'
 module LazyArraySpec
   module GroupMethods
     def self.extended(base)
-      base.class_inheritable_accessor :loaded, :subject_block, :action_block
+      base.class_inheritable_accessor :loaded
     end
 
     def subject(&block)
-       self.subject_block = block
+      let(:subject, &block)
     end
 
     def action(&block)
-      self.action_block = block
+      let(:action, &block)
     end
 
     def should_respond_to(method)
@@ -110,22 +111,11 @@ module LazyArraySpec
       end
     end
   end
-
-  module Methods
-    def subject
-      @subject ||= instance_eval(&self.class.subject_block)
-    end
-
-    def action
-      instance_eval(&self.class.action_block)
-    end
-  end
 end
 
 [ false, true ].each do |loaded|
   describe LazyArray do
     extend LazyArraySpec::GroupMethods
-    include LazyArraySpec::Methods
 
     self.loaded = loaded
 
@@ -1953,7 +1943,7 @@ end
     describe 'an unknown method' do
       action { subject.unknown }
 
-      should_raise_error(NoMethodError)
+      should_raise_error(NameError)
     end
   end
 end

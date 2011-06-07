@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', '..', 'spec_helper'))
+require 'spec_helper'
 
 describe DataMapper::Property::Text do
   before :all do
@@ -15,7 +15,8 @@ describe DataMapper::Property::Text do
   describe 'migration with an index' do
     supported_by :all do
       before do
-        @model = DataMapper::Model.new do
+        Object.send(:remove_const, :Foo) if Object.const_defined?(:Foo)
+        @model = DataMapper::Model.new('Foo') do
           storage_names[:default] = 'anonymous'
 
           property :id,   DataMapper::Property::Serial
@@ -34,7 +35,9 @@ describe DataMapper::Property::Text do
   describe 'migration with a unique index' do
     supported_by :all do
       before do
-        @model = DataMapper::Model.new do
+
+        Object.send(:remove_const, :Foo) if Object.const_defined?(:Foo)
+        @model = DataMapper::Model.new('Foo') do
           storage_names[:default] = 'anonymous'
 
           property :id,   DataMapper::Property::Serial

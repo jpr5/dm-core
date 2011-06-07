@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', '..', 'spec_helper'))
+require 'spec_helper'
 
 share_examples_for 'it creates a one accessor' do
   describe 'accessor' do
@@ -281,7 +281,9 @@ share_examples_for 'it creates a many accessor' do
         @expected.should_not be_nil
 
         # set the model scope to only return the first record
-        @model.default_scope.update(@model.key(@repository.name).zip(@expected.key).to_hash)
+        @model.default_scope.update(
+          Hash[ @model.key(@repository.name).zip(@expected.key) ]
+        )
 
         @return = @car.model.get(*@car.key).__send__(@name)
       end
@@ -432,7 +434,7 @@ describe DataMapper::Associations do
     class ::Car
       include DataMapper::Resource
 
-      property :id, Serial
+      property :id,   Serial
       property :name, String
     end
 
@@ -493,6 +495,27 @@ describe DataMapper::Associations do
         it 'should create a foreign key that is part of the key' do
           @relationship.child_key.each do |property|
             property.should be_key
+          end
+        end
+      end
+
+      describe 'with a :unique option' do
+        let(:unique) { [ :one, :two, :three ] }
+
+        before :all do
+          @relationship = Car.belongs_to("#{@name}_with_unique".to_sym, @model, :unique => unique)
+          DataMapper.finalize
+        end
+
+        it 'should create a foreign key that is unique' do
+          @relationship.child_key.each do |property|
+            property.should be_unique
+          end
+        end
+
+        it 'should create a foreign key that has a unique index' do
+          @relationship.child_key.each do |property|
+            property.unique_index.should equal(unique)
           end
         end
       end

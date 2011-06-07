@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', '..', 'spec_helper'))
+require 'spec_helper'
 
 share_examples_for 'A Limited Many to Many Collection' do
   describe '#destroy!' do
@@ -39,10 +39,11 @@ end
         class Article
           include DataMapper::Resource
 
-          property :id,       Serial
-          property :title,    String, :required => true
-          property :content,  Text
-          property :subtitle, String
+          property :id,         Serial
+          property :title,      String, :required => true
+          property :content,    Text
+          property :subtitle,   String
+          property :attachment, Object
 
           has n, :authors, :through => Resource
           belongs_to :original, self, :required => false
@@ -129,10 +130,11 @@ end
         class Article
           include DataMapper::Resource
 
-          property :id,      Serial
-          property :title,   String, :required => true
-          property :content, Text
-          property :subtitle, String
+          property :id,         Serial
+          property :title,      String, :required => true
+          property :content,    Text
+          property :subtitle,   String
+          property :attachment, Object
 
           property :site_name, String, :default => 'default'
 

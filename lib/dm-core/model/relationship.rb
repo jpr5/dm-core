@@ -31,7 +31,7 @@ module DataMapper
 
           @relationships.each do |repository_name, relationships|
             model_relationships = model.relationships(repository_name)
-            relationships.each { |name, relationship| model_relationships[name] ||= relationship }
+            relationships.each { |relationship| model_relationships << relationship }
           end
 
           super
@@ -42,7 +42,7 @@ module DataMapper
       #
       # @param [Symbol] repository_name
       #   Name of the repository for which relationships set is returned
-      # @return [Mash]  relationships set for given repository
+      # @return [RelationshipSet]  relationships set for given repository
       #
       # @api semipublic
       def relationships(repository_name = default_repository_name)
@@ -53,7 +53,7 @@ module DataMapper
         default_repository_name = self.default_repository_name
 
         @relationships[repository_name] ||= if repository_name == default_repository_name
-          Mash.new
+          RelationshipSet.new
         else
           relationships(default_repository_name).dup
         end
@@ -124,10 +124,12 @@ module DataMapper
           Associations::OneToOne::Relationship
         end
 
-        relationship = relationships(repository_name)[name] = klass.new(name, model, self, options)
+        relationship = klass.new(name, model, self, options)
+
+        relationships(repository_name) << relationship
 
         descendants.each do |descendant|
-          descendant.relationships(repository_name)[name] ||= relationship
+          descendant.relationships(repository_name) << relationship
         end
 
         create_relationship_reader(relationship)
@@ -161,15 +163,12 @@ module DataMapper
         options    = extract_options(args)
 
         if options.key?(:through)
-          warn "#{model_name}#belongs_to with :through is deprecated, use 'has 1, :#{name}, #{options.inspect}' in #{model_name} instead (#{caller[0]})"
-          return has(1, name, model, options)
+          raise "#{model_name}#belongs_to with :through is deprecated, use 'has 1, :#{name}, #{options.inspect}' in #{model_name} instead (#{caller.first})"
+        elsif options.key?(:model) && model
+          raise ArgumentError, 'should not specify options[:model] if passing the model in the third argument'
         end
 
         assert_valid_options(options)
-
-        if options.key?(:model) && model
-          raise ArgumentError, 'should not specify options[:model] if passing the model in the third argument'
-        end
 
         model ||= options.delete(:model)
 
@@ -179,10 +178,12 @@ module DataMapper
         options[:child_repository_name]  = repository_name
         options[:parent_repository_name] = options.delete(:repository)
 
-        relationship = relationships(repository_name)[name] = Associations::ManyToOne::Relationship.new(name, self, model, options)
+        relationship = Associations::ManyToOne::Relationship.new(name, self, model, options)
+
+        relationships(repository_name) << relationship
 
         descendants.each do |descendant|
-          descendant.relationships(repository_name)[name] ||= relationship
+          descendant.relationships(repository_name) << relationship
         end
 
         create_relationship_reader(relationship)
@@ -253,8 +254,6 @@ module DataMapper
         # TODO: update to match Query#assert_valid_options
         #   - perform options normalization elsewhere
 
-        caller_method = caller[1]
-
         if options.key?(:min) && options.key?(:max)
           min = options[:min]
           max = options[:max]
@@ -278,15 +277,9 @@ module DataMapper
         end
 
         if options.key?(:class_name)
-          options[:class_name] = options[:class_name].to_str
-          warn "+options[:class_name]+ is deprecated, use :model instead (#{caller_method})"
-          options[:model] = options.delete(:class_name)
-        end
-
-        if options.key?(:remote_name)
-          options[:remote_name] = options[:remote_name].to_sym
-          warn "+options[:remote_name]+ is deprecated, use :via instead (#{caller_method})"
-          options[:via] = options.delete(:remote_name)
+          raise "+options[:class_name]+ is deprecated, use :model instead (#{caller[1]})"
+        elsif options.key?(:remote_name)
+          raise "+options[:remote_name]+ is deprecated, use :via instead (#{caller[1]})"
         end
 
         if options.key?(:through)
@@ -313,6 +306,20 @@ module DataMapper
         end
       end
 
+      # Defines the anonymous module that is used to add relationships.
+      # Using a single module here prevents having a very large number
+      # of anonymous modules, where each property has their own module.
+      # @api private
+      def relationship_module
+        @relationship_module ||= begin
+          mod = Module.new
+          class_eval do
+            include mod
+          end
+          mod
+        end
+      end
+
       # Dynamically defines reader method
       #
       # @api private
@@ -324,18 +331,16 @@ module DataMapper
 
         reader_visibility = relationship.reader_visibility
 
-        class_eval <<-RUBY, __FILE__, __LINE__ + 1
-          chainable do
-            #{reader_visibility}
-            def #{reader_name}(query = nil)
-              # TODO: when no query is passed in, return the results from
-              #       the ivar directly. This will require that the ivar
-              #       actually hold the resource/collection, and in the case
-              #       of 1:1, the underlying collection is hidden in a
-              #       private ivar, and the resource is in a known ivar
+        relationship_module.module_eval <<-RUBY, __FILE__, __LINE__ + 1
+          #{reader_visibility}
+          def #{reader_name}(query = nil)
+            # TODO: when no query is passed in, return the results from
+            #       the ivar directly. This will require that the ivar
+            #       actually hold the resource/collection, and in the case
+            #       of 1:1, the underlying collection is hidden in a
+            #       private ivar, and the resource is in a known ivar
 
-              persisted_state.get(relationships[#{name.inspect}], query)
-            end
+            persisted_state.get(relationships[#{name.inspect}], query)
           end
         RUBY
       end
@@ -351,14 +356,12 @@ module DataMapper
 
         writer_visibility = relationship.writer_visibility
 
-        class_eval <<-RUBY, __FILE__, __LINE__ + 1
-          chainable do
-            #{writer_visibility}
-            def #{writer_name}(target)
-              relationship = relationships[#{name.inspect}]
-              self.persisted_state = persisted_state.set(relationship, target)
-              persisted_state.get(relationship)
-            end
+        relationship_module.module_eval <<-RUBY, __FILE__, __LINE__ + 1
+          #{writer_visibility}
+          def #{writer_name}(target)
+            relationship = relationships[#{name.inspect}]
+            self.persisted_state = persisted_state.set(relationship, target)
+            persisted_state.get(relationship)
           end
         RUBY
       end

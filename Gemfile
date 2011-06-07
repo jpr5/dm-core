@@ -2,67 +2,55 @@ require 'pathname'
 
 source 'http://rubygems.org'
 
-SOURCE       = ENV['SOURCE']   ? ENV['SOURCE'].to_sym              : :git
-REPO_POSTFIX = SOURCE == :path ? ''                                : '.git'
-DATAMAPPER   = SOURCE == :path ? Pathname(__FILE__).dirname.parent : 'http://github.com/datamapper'
-DM_VERSION   = '~> 1.0.2'
+SOURCE         = ENV.fetch('SOURCE', :git).to_sym
+REPO_POSTFIX   = SOURCE == :path ? ''                                : '.git'
+DATAMAPPER     = SOURCE == :path ? Pathname(__FILE__).dirname.parent : 'http://github.com/datamapper'
+DM_VERSION     = '~> 1.1.1'
+DO_VERSION     = '~> 0.10.6'
+DM_DO_ADAPTERS = %w[ sqlite postgres mysql oracle sqlserver ]
 
-group :runtime do # Runtime dependencies (as in the gemspec)
+gem 'addressable', '~> 2.2.4'
 
-  if ENV['EXTLIB']
-    gem 'extlib',        '~> 0.9.15', SOURCE => "#{DATAMAPPER}/extlib#{REPO_POSTFIX}", :require => nil
-  else
-    gem 'activesupport', '~> 3.0.3', :require => nil
-  end
+group :development do
 
-  gem 'addressable',     '~> 2.2'
-
-end
-
-group(:development) do # Development dependencies (as in the gemspec)
-
-  gem 'rake',           '~> 0.8.7'
-  gem 'rspec',          '~> 1.3.1'
-  gem 'jeweler',        '~> 1.4.0'
+  gem 'jeweler', '~> 1.5.2'
+  gem 'rake',    '~> 0.8.7'
+  gem 'rspec',   '~> 1.3.1'
+  gem 'yard',    '~> 0.6'
 
 end
 
-group :quality do # These gems contain rake tasks that check the quality of the source code
+group :quality do
 
-  gem 'rcov',           '~> 0.9.7', :platforms => :mri_18
-  gem 'yard',           '~> 0.5'
-  gem 'yardstick',      '~> 0.1'
+  gem 'yardstick',  '~> 0.2'
+  gem 'rcov',       '~> 0.9.9', :platforms => [ :mri_18 ]
 
 end
 
-group :datamapper do # We need this because we want to pin these dependencies to their git master sources
+group :datamapper do
 
-  gem 'dm-core', DM_VERSION, :path => File.dirname(__FILE__) # Make ourself available to the adapters
+  # Make ourself available to the adapters
+  gem 'dm-core', DM_VERSION, :path => File.dirname(__FILE__)
 
-  adapters = ENV['ADAPTERS'] || ENV['ADAPTER'] || 'in_memory'
-  adapters = adapters.to_s.tr(',', ' ').split.uniq
-
-  DO_VERSION     = '~> 0.10.2'
-  DM_DO_ADAPTERS = %w[ sqlite postgres mysql oracle sqlserver ]
+  adapters = ENV['ADAPTERS'] || ENV['ADAPTER']
+  adapters = adapters.to_s.tr(',', ' ').split.uniq - %w[ in_memory ]
 
   if (do_adapters = DM_DO_ADAPTERS & adapters).any?
-    options = {}
-    options[:git] = "#{DATAMAPPER}/do#{REPO_POSTFIX}" if ENV['DO_GIT'] == 'true'
+    do_options = {}
+    do_options[:git] = "#{DATAMAPPER}/do#{REPO_POSTFIX}" if ENV['DO_GIT'] == 'true'
 
-    gem 'data_objects',  DO_VERSION, options.dup
+    gem 'data_objects', DO_VERSION, do_options.dup
 
     do_adapters.each do |adapter|
       adapter = 'sqlite3' if adapter == 'sqlite'
-      gem "do_#{adapter}", DO_VERSION, options.dup
+      gem "do_#{adapter}", DO_VERSION, do_options.dup
     end
 
     gem 'dm-do-adapter', DM_VERSION, SOURCE => "#{DATAMAPPER}/dm-do-adapter#{REPO_POSTFIX}"
   end
 
   adapters.each do |adapter|
-    unless adapter == 'in_memory'
-      gem "dm-#{adapter}-adapter", DM_VERSION, SOURCE => "#{DATAMAPPER}/dm-#{adapter}-adapter#{REPO_POSTFIX}"
-    end
+    gem "dm-#{adapter}-adapter", ENV.fetch('ADAPTER_VERSION', DM_VERSION), SOURCE => "#{DATAMAPPER}/dm-#{adapter}-adapter#{REPO_POSTFIX}"
   end
 
   plugins = ENV['PLUGINS'] || ENV['PLUGIN']

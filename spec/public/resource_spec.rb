@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', 'spec_helper'))
+require 'spec_helper'
 
 describe DataMapper::Resource do
   before :all do
@@ -219,6 +219,64 @@ describe DataMapper::Resource do
         it 'should return correct parent' do
           resource = @user_model.get(*@user.key)
           resource.referrer.should == @solnic
+        end
+      end
+    end
+
+    describe '#attribute_get' do
+      subject { object.attribute_get(name) }
+
+      let(:object) { @user }
+
+      context 'with a known property' do
+        let(:name) { :name }
+
+        it 'returns the attribute value' do
+          should == 'dbussink'
+        end
+      end
+
+      context 'with an unknown property' do
+        let(:name) { :unknown }
+
+        it 'returns nil' do
+          should be_nil
+        end
+      end
+    end
+
+    describe '#attribute_set' do
+      subject { object.attribute_set(name, value) }
+
+      let(:object) { @user.dup }
+
+      context 'with a known property' do
+        let(:name)  { :name   }
+        let(:value) { 'dkubb' }
+
+        it 'sets the attribute' do
+          expect { subject }.to change { object.name }.
+            from('dbussink').
+            to('dkubb')
+        end
+
+        it 'makes the object dirty' do
+          expect { subject }.to change { object.dirty? }.
+            from(false).
+            to(true)
+        end
+      end
+
+      context 'with an unknown property' do
+        let(:name)  { :unknown              }
+        let(:value) { mock('Unknown Value') }
+
+        it 'does not set the attribute' do
+          expect { subject }.to_not change { object.attributes.dup }
+        end
+
+        it 'does not make the object dirty' do
+          expect { subject }.to_not change { object.dirty? }
         end
       end
     end

@@ -1,6 +1,3 @@
-require 'dm-core/resource'
-require 'dm-core/query'
-
 module DataMapper
   # = Properties
   # Properties for a model are not derived from a database structure, but
@@ -36,7 +33,7 @@ module DataMapper
   #   end
   #
   # By default, DataMapper supports the following primitive (Ruby) types
-  # also called core types:
+  # also called core properties:
   #
   # * Boolean
   # * Class (datastore primitive is the same as String. Used for Inheritance)
@@ -49,10 +46,6 @@ module DataMapper
   # * String (default length is 50)
   # * Text (limit of 65k characters by default)
   # * Time
-  #
-  # Other types are known as custom types.
-  #
-  # For more information about available Types, see DataMapper::Type
   #
   # == Limiting Access
   # Property access control is uses the same terminology Ruby does. Properties
@@ -183,44 +176,40 @@ module DataMapper
   #
   # == Inferred Validations
   # If you require the dm-validations plugin, auto-validations will
-  # automatically be mixed-in in to your model classes:
-  # validation rules that are inferred when properties are declared with
-  # specific column restrictions.
+  # automatically be mixed-in in to your model classes: validation rules that
+  # are inferred when properties are declared with specific column restrictions.
   #
-  #  class Post
-  #    include DataMapper::Resource
+  #   class Post
+  #     include DataMapper::Resource
   #
-  #    property :title, String, :length => 250
-  #      # => infers 'validates_length :title,
-  #             :minimum => 0, :maximum => 250'
+  #     property :title, String, :length => 250, :min => 0, :max => 250
+  #     # => infers 'validates_length :title'
   #
-  #    property :title, String, :required => true
-  #      # => infers 'validates_present :title
+  #     property :title, String, :required => true
+  #     # => infers 'validates_present :title'
   #
-  #    property :email, String, :format => :email_address
-  #      # => infers 'validates_format :email, :with => :email_address
+  #     property :email, String, :format => :email_address
+  #     # => infers 'validates_format :email, :with => :email_address'
   #
-  #    property :title, String, :length => 255, :required => true
-  #      # => infers both 'validates_length' as well as
-  #      #    'validates_present'
-  #      #    better: property :title, String, :length => 1..255
-  #
-  #  end
+  #     property :title, String, :length => 255, :required => true
+  #     # => infers both 'validates_length' as well as 'validates_present'
+  #     #    better: property :title, String, :length => 1..255
+  #   end
   #
   # This functionality is available with the dm-validations gem. For more information
   # about validations, check the documentation for dm-validations.
   #
   # == Default Values
-  # To set a default for a property, use the <tt>:default</tt> key.  The
+  # To set a default for a property, use the <tt>:default</tt> key. The
   # property will be set to the value associated with that key the first time
   # it is accessed, or when the resource is saved if it hasn't been set with
-  # another value already.  This value can be a static value, such as 'hello'
+  # another value already. This value can be a static value, such as 'hello'
   # but it can also be a proc that will be evaluated when the property is read
-  # before its value has been set.  The property is set to the return of the
-  # proc.  The proc is passed two values, the resource the property is being set
+  # before its value has been set. The property is set to the return of the
+  # proc. The proc is passed two values, the resource the property is being set
   # for and the property itself.
   #
-  #   property :display_name, String, :default => { |resource, property| resource.login }
+  #   property :display_name, String, :default => lambda { |resource, property| resource.login }
   #
   # Word of warning.  Don't try to read the value of the property you're setting
   # the default for in the proc.  An infinite loop will ensue.
@@ -274,9 +263,6 @@ module DataMapper
   #                       Only makes sense for float type properties. Must be > 0.
   #                       Default is nil for Float type and 10 for BigDecimal
   #
-  #  All other keys you pass to +property+ method are stored and available
-  #  as options[:extra_keys].
-  #
   # == Overriding default Property options
   #
   # There is the ability to reconfigure a Property and it's subclasses by explicitly
@@ -295,7 +281,7 @@ module DataMapper
   #   DataMapper::Property.auto_validation(false)
   #
   #   # set all mutator methods to be private by default
-  #   DataMapper::Property.writer(false)
+  #   DataMapper::Property.writer(:private)
   #
   # Please note that this has no effect when a subclass has explicitly
   # defined it's own option. For example, setting the String length to
@@ -315,12 +301,7 @@ module DataMapper
     module PassThroughLoadDump
       # @api semipublic
       def load(value)
-        unless value.nil?
-          value = type.load(value, self) if type
-          typecast(value)
-        else
-          value
-        end
+        typecast(value) unless value.nil?
       end
 
       # Stub instance method for dumping
@@ -331,25 +312,16 @@ module DataMapper
       #
       # @api semipublic
       def dump(value)
-        if type
-          type.dump(value, self)
-        else
-          value
-        end
+        value
       end
     end
 
     include DataMapper::Assertions
     include Subject
     extend Chainable
-    extend Deprecate
     extend Equalizer
 
-    deprecate :unique,    :unique?
-    deprecate :nullable?, :allow_nil?
-    deprecate :value,     :dump
-
-    equalize :model, :name
+    equalize :model, :name, :options
 
     PRIMITIVES = [
       TrueClass,
@@ -374,10 +346,13 @@ module DataMapper
     VISIBILITY_OPTIONS = [ :public, :protected, :private ].to_set.freeze
 
     # Invalid property names
-    INVALID_NAMES = (Resource.instance_methods + Resource.private_instance_methods + Query::OPTIONS.to_a).map { |name| name.to_s }.freeze
+    INVALID_NAMES = (Resource.instance_methods +
+                     Resource.private_instance_methods +
+                     Query::OPTIONS.to_a
+                    ).map { |name| name.to_s }
 
     attr_reader :primitive, :model, :name, :instance_variable_name,
-      :type, :reader_visibility, :writer_visibility, :options,
+      :reader_visibility, :writer_visibility, :options,
       :default, :repository_name, :allow_nil, :allow_blank, :required
 
     class << self
@@ -387,30 +362,19 @@ module DataMapper
 
       # @api semipublic
       def determine_class(type)
-        if type < DataMapper::Property::Object
-          return type
-        end
+        return type if type < DataMapper::Property::Object
+        find_class(DataMapper::Inflector.demodulize(type.name))
+      end
 
-        name  = DataMapper::Inflector.demodulize(type.name)
-        klass = find_class(name)
-
-        if !klass && type < DataMapper::Type
-          klass = find_class(type.primitive.name)
-        end
-
-        klass
+      # @api private
+      def demodulized_names
+        @demodulized_names ||= {}
       end
 
       # @api semipublic
       def find_class(name)
-        klass = descendants.detect do |descendant|
-          DataMapper::Inflector.demodulize(descendant.name) == name
-        end
-
-        if !klass && const_defined?(name)
-          klass = const_get(name)
-        end
-
+        klass   = demodulized_names[name]
+        klass ||= const_get(name) if const_defined?(name)
         klass
       end
 
@@ -421,7 +385,27 @@ module DataMapper
 
       # @api private
       def inherited(descendant)
+        # Descendants is a tree rooted in DataMapper::Property that tracks
+        # inheritance.  We pre-calculate each comparison value (demodulized
+        # class name) to achieve a Hash[]-time lookup, rather than walk the
+        # entire descendant tree and calculate names on-demand (expensive,
+        # redundant).
+        #
+        # Since the algorithm relegates property class name lookups to a flat
+        # namespace, we need to ensure properties defined outside of DM don't
+        # override built-ins (Serial, String, etc) by merely defining a property
+        # of a same name.  We avoid this by only ever adding to the lookup
+        # table.  Given that DM loads its own property classes first, we can
+        # assume that their names are "reserved" when added to the table.
+        #
+        # External property authors who want to provide "replacements" for
+        # builtins (e.g. in a non-DM-supported adapter) should follow the
+        # convention of wrapping those properties in a module, and include'ing
+        # the module on the model class directly.  This bypasses the DM-hooked
+        # const_missing lookup that would normally check this table.
         descendants << descendant
+
+        Property.demodulized_names[DataMapper::Inflector.demodulize(descendant.name)] ||= descendant
 
         # inherit accepted options
         descendant.accepted_options.concat(accepted_options)
@@ -460,20 +444,19 @@ module DataMapper
       # @api private
       def nullable(*args)
         # :required is preferable to :allow_nil, but :nullable maps precisely to :allow_nil
-        warn "#nullable is deprecated, use #required instead (#{caller[0]})"
-        allow_nil(*args)
+        raise "#nullable is deprecated, use #required instead (#{caller.first})"
       end
 
-      # Gives all the options set on this type
+      # Gives all the options set on this property
       #
-      # @return [Hash] with all options and their values set on this type
+      # @return [Hash] with all options and their values set on this property
       #
       # @api public
       def options
         options = {}
         accepted_options.each do |method|
           value = send(method)
-          options[method] = send(method) unless value.nil?
+          options[method] = value unless value.nil?
         end
         options
       end
@@ -481,9 +464,9 @@ module DataMapper
 
     accept_options :primitive, *Property::OPTIONS
 
-    # A hook to allow types to extend or modify property it's bound to.
-    # Implementations are not supposed to modify the state of the type class, and
-    # should produce no side-effects on the type class.
+    # A hook to allow properties to extend or modify the model it's bound to.
+    # Implementations are not supposed to modify the state of the property
+    # class, and should produce no side-effects on the property instance.
     def bind
       # no op
     end
@@ -493,21 +476,14 @@ module DataMapper
     # @return [String] name of field in data-store
     #
     # @api semipublic
-    def field(repository_name = Undefined)
-      self_repository_name = self.repository_name
-      klass                = self.class
-
-      unless repository_name.equal?(Undefined)
-        warn "Passing in +repository_name+ to #{klass}#field is deprecated (#{caller[0]})"
-
-        if repository_name != self_repository_name
-          raise ArgumentError, "Mismatching +repository_name+ with #{klass}#repository_name (#{repository_name.inspect} != #{self_repository_name.inspect})"
-        end
+    def field(repository_name = nil)
+      if repository_name
+        raise "Passing in +repository_name+ to #{self.class}#field is deprecated (#{caller.first})"
       end
 
       # defer setting the field with the adapter specific naming
       # conventions until after the adapter has been setup
-      @field ||= model.field_naming_convention(self_repository_name).call(self).freeze
+      @field ||= model.field_naming_convention(self.repository_name).call(self).freeze
     end
 
     # Returns true if property is unique. Serial properties and keys
@@ -602,16 +578,6 @@ module DataMapper
     # @api public
     def allow_blank?
       @allow_blank
-    end
-
-    # Returns whether or not the property is custom (not provided by dm-core)
-    #
-    # @return [Boolean]
-    #   whether or not the property is custom
-    #
-    # @api public
-    def custom?
-      @custom
     end
 
     # Standardized reader method for the property
@@ -714,9 +680,7 @@ module DataMapper
 
     # @api semipublic
     def typecast(value)
-      if @type && @type.respond_to?(:typecast)
-        @type.typecast(value, self)
-      elsif value.nil? || primitive?(value)
+      if value.nil? || primitive?(value)
         value
       elsif respond_to?(:typecast_to_primitive)
         typecast_to_primitive(value)
@@ -766,7 +730,7 @@ module DataMapper
     end
 
     chainable do
-      def self.new(model, name, options = {}, type = nil)
+      def self.new(model, name, options = {})
         super
       end
     end
@@ -774,22 +738,17 @@ module DataMapper
     protected
 
     # @api semipublic
-    def initialize(model, name, options = {}, type = nil)
+    def initialize(model, name, options = {})
       options = options.to_hash.dup
 
-      if type && !kind_of?(type)
-        warn "#{type} < DataMapper::Type is deprecated, use the new DataMapper::Property API instead (#{caller[2]})"
-        @type = type
-      end
-
-      if INVALID_NAMES.include?(name.to_s)
-        raise ArgumentError, "+name+ was #{name.inspect}, which cannot be used as a property name since it collides with an existing method or a query option"
+      if INVALID_NAMES.include?(name.to_s) || (kind_of?(Boolean) && INVALID_NAMES.include?("#{name}?"))
+        raise ArgumentError,
+          "+name+ was #{name.inspect}, which cannot be used as a property name since it collides with an existing method or a query option"
       end
 
       assert_valid_options(options)
 
       predefined_options = self.class.options
-      predefined_options.merge!(@type.options) if @type
 
       @repository_name        = model.repository_name
       @model                  = model
@@ -797,9 +756,8 @@ module DataMapper
       @options                = predefined_options.merge(options).freeze
       @instance_variable_name = "@#{@name}".freeze
 
-      @primitive = self.class.primitive || @type.primitive
-      @custom    = !@type.nil?
-      @field     = @options[:field].freeze
+      @primitive = self.class.primitive
+      @field     = @options[:field].freeze unless @options[:field].nil?
       @default   = @options[:default]
 
       @serial       = @options.fetch(:serial,       false)
@@ -814,7 +772,7 @@ module DataMapper
 
       determine_visibility
 
-      @type ? @type.bind(self) : bind
+      bind
     end
 
     # @api private
@@ -842,7 +800,7 @@ module DataMapper
               raise ArgumentError, "options[:#{key}] must be either true or false"
             end
 
-            if key == :required && (keys & [ :allow_nil, :allow_blank ]).size > 0
+            if key == :required && (keys.include?(:allow_nil) || keys.include?(:allow_blank))
               raise ArgumentError, 'options[:required] cannot be mixed with :allow_nil or :allow_blank'
             end
 

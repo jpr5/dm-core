@@ -362,12 +362,12 @@ module DataMapper
       @options = @options.merge(other_options).freeze
       assert_valid_options(@options)
 
-      normalize = other_options.only(*OPTIONS - [ :conditions ]).map do |attribute, value|
-        instance_variable_set("@#{attribute}", value.try_dup)
+      normalize = DataMapper::Ext::Hash.only(other_options, *OPTIONS - [ :conditions ]).map do |attribute, value|
+        instance_variable_set("@#{attribute}", DataMapper::Ext.try_dup(value))
         attribute
       end
 
-      merge_conditions([ other_options.except(*OPTIONS), other_options[:conditions] ])
+      merge_conditions([ DataMapper::Ext::Hash.except(other_options, *OPTIONS), other_options[:conditions] ])
       normalize_options(normalize | [ :links, :unique ])
 
       self
@@ -689,7 +689,7 @@ module DataMapper
     #
     # @api private
     def to_relative_hash
-      to_hash.only(:fields, :order, :unique, :add_reversed, :reload)
+      DataMapper::Ext::Hash.only(to_hash, :fields, :order, :unique, :add_reversed, :reload)
     end
 
     private
@@ -737,7 +737,7 @@ module DataMapper
       @reload       = @options.fetch :reload,       false
       @raw          = false
 
-      merge_conditions([ @options.except(*OPTIONS), @options[:conditions] ])
+      merge_conditions([ DataMapper::Ext::Hash.except(@options, *OPTIONS), @options[:conditions] ])
       normalize_options
     end
 
@@ -748,7 +748,7 @@ module DataMapper
       @fields     = @fields.dup
       @links      = @links.dup
       @conditions = @conditions.dup
-      @order      = @order.try_dup
+      @order      = DataMapper::Ext.try_dup(@order)
     end
 
     # Validate the options
@@ -825,7 +825,7 @@ module DataMapper
       links.each do |link|
         case link
           when Symbol, String
-            unless @relationships.key?(link.to_sym)
+            unless @relationships.named?(link.to_sym)
               raise ArgumentError, "+options[:links]+ entry #{link.inspect} does not map to a relationship in #{model}"
             end
 
@@ -855,12 +855,9 @@ module DataMapper
               when Symbol, ::String
                 original = subject
                 subject  = subject.to_s
+                name     = subject[0, subject.index('.') || subject.length]
 
-                if subject.include?('.')
-                  unless @relationships.key?(subject[0, subject.index('.')])
-                    raise ArgumentError, "condition #{original.inspect} does not map to a relationship in #{model}"
-                  end
-                elsif !@properties.named?(subject) && !@relationships.key?(subject)
+                unless @properties.named?(name) || @relationships.named?(name)
                   raise ArgumentError, "condition #{original.inspect} does not map to a property or relationship in #{model}"
                 end
 
@@ -899,7 +896,7 @@ module DataMapper
 
           first_condition = conditions.first
 
-          unless first_condition.kind_of?(String) && !first_condition.blank?
+          unless first_condition.kind_of?(String) && !DataMapper::Ext.blank?(first_condition)
             raise ArgumentError, '+options[:conditions]+ should have a statement for the first entry'
           end
       end
@@ -954,10 +951,9 @@ module DataMapper
               raise ArgumentError, "+options[:order]+ entry #{order_entry.inspect} does not map to a property in #{model}"
             end
 
-          when Property
-            unless @properties.include?(order_entry)
-              raise ArgumentError, "+options[:order]+ entry #{order_entry.name.inspect} does not map to a property in #{model}"
-            end
+          when Property, Path
+            # Allow any arbitrary property, since it may map to a model
+            # that has been included via the :links option
 
           when Operator, Direction
             operator = order_entry.operator
@@ -1054,8 +1050,6 @@ module DataMapper
     def normalize_order
       return if @order.nil?
 
-      # TODO: should Query::Path objects be permitted?  If so, then it
-      # should probably be normalized to a Direction object
       @order = Array(@order)
       @order = @order.map do |order|
         case order
@@ -1073,6 +1067,10 @@ module DataMapper
 
           when Direction
             order.dup
+
+          when Path
+            Direction.new(order.property)
+
         end
       end
     end

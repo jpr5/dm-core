@@ -21,7 +21,7 @@ module DataMapper
         unless model_name.empty? || model_name[0] == ?#
           parts         = model_name.split('::')
           constant_name = parts.pop.to_sym
-          base          = parts.empty? ? Object : Object.full_const_get(parts.join('::'))
+          base          = parts.empty? ? Object : DataMapper::Ext::Object.full_const_get(parts.join('::'))
 
           base.class_eval { remove_const(constant_name) if const_defined?(constant_name) }
         end
@@ -29,12 +29,9 @@ module DataMapper
         remove_ivars(model)
         model.instance_methods(false).each { |method| model.send(:undef_method, method) }
 
-        DataMapper::Model.descendants.delete(model)
       end
 
-      unless DataMapper::Model.descendants.empty?
-        raise 'DataMapper::Model.descendants is not empty'
-      end
+      DataMapper::Model.descendants.clear
     end
 
     def self.remove_ivars(object, instance_variables = object.instance_variables)

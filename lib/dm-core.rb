@@ -11,53 +11,10 @@ module DataMapper
   module Undefined; end
 end
 
-begin
-
-  # Prefer active_support
-
-  require 'active_support/core_ext/kernel/singleton_class'
-  require 'active_support/core_ext/class/inheritable_attributes'
-  require 'active_support/core_ext/object/blank'
-  require 'active_support/core_ext/hash/except'
-
-  require 'active_support/hash_with_indifferent_access'
-  require 'active_support/inflector'
-
-  Mash = ActiveSupport::HashWithIndifferentAccess
-
-  require 'dm-core/core_ext/hash'
-  require 'dm-core/core_ext/object'
-  require 'dm-core/core_ext/string'
-
-  module DataMapper
-    Inflector = ActiveSupport::Inflector
-  end
-
-rescue LoadError
-
-  # Default to extlib
-
-  require 'extlib/inflection'
-  require 'extlib/mash'
-  require 'extlib/string'
-  require 'extlib/class'
-  require 'extlib/hash'
-  require 'extlib/object'
-  require 'extlib/blank'
-
-  class Object
-    unless respond_to?(:singleton_class)
-      def singleton_class
-        class << self; self end
-      end
-    end
-  end
-
-  module DataMapper
-    Inflector = Extlib::Inflection
-  end
-
-end
+require 'dm-core/support/ext/blank'
+require 'dm-core/support/ext/hash'
+require 'dm-core/support/ext/object'
+require 'dm-core/support/ext/string'
 
 begin
   require 'fastthread'
@@ -66,9 +23,14 @@ rescue LoadError
 end
 
 require 'dm-core/core_ext/pathname'
-require 'dm-core/core_ext/module'
-require 'dm-core/core_ext/array'
+require 'dm-core/support/ext/module'
+require 'dm-core/support/ext/array'
+require 'dm-core/support/ext/try_dup'
 
+require 'dm-core/support/mash'
+require 'dm-core/support/inflector/inflections'
+require 'dm-core/support/inflector/methods'
+require 'dm-core/support/inflections'
 require 'dm-core/support/chainable'
 require 'dm-core/support/deprecate'
 require 'dm-core/support/descendant_set'
@@ -78,17 +40,29 @@ require 'dm-core/support/lazy_array'
 require 'dm-core/support/local_object_space'
 require 'dm-core/support/hook'
 require 'dm-core/support/subject'
+require 'dm-core/support/ordered_set'
+require 'dm-core/support/subject_set'
 
-require 'dm-core/collection'
+require 'dm-core/query'
+require 'dm-core/query/conditions/operation'
+require 'dm-core/query/conditions/comparison'
+require 'dm-core/query/operator'
+require 'dm-core/query/direction'
+require 'dm-core/query/path'
+require 'dm-core/query/sort'
 
-require 'dm-core/type'
-require 'dm-core/types/boolean'
-require 'dm-core/types/discriminator'
-require 'dm-core/types/text'
-require 'dm-core/types/object'
-require 'dm-core/types/serial'
+require 'dm-core/resource'
+require 'dm-core/resource/state'
+require 'dm-core/resource/state/transient'
+require 'dm-core/resource/state/immutable'
+require 'dm-core/resource/state/persisted'
+require 'dm-core/resource/state/clean'
+require 'dm-core/resource/state/deleted'
+require 'dm-core/resource/state/dirty'
 
 require 'dm-core/property'
+require 'dm-core/property/typecast/numeric'
+require 'dm-core/property/typecast/time'
 require 'dm-core/property/object'
 require 'dm-core/property/string'
 require 'dm-core/property/binary'
@@ -104,7 +78,6 @@ require 'dm-core/property/date_time'
 require 'dm-core/property/time'
 require 'dm-core/property/class'
 require 'dm-core/property/discriminator'
-
 require 'dm-core/property/lookup'
 require 'dm-core/property_set'
 
@@ -115,30 +88,19 @@ require 'dm-core/model/scope'
 require 'dm-core/model/relationship'
 require 'dm-core/model/property'
 
-require 'dm-core/adapters'
-require 'dm-core/adapters/abstract_adapter'
+require 'dm-core/collection'
+require 'dm-core/relationship_set'
 require 'dm-core/associations/relationship'
 require 'dm-core/associations/one_to_many'
 require 'dm-core/associations/one_to_one'
 require 'dm-core/associations/many_to_one'
 require 'dm-core/associations/many_to_many'
+
 require 'dm-core/identity_map'
-require 'dm-core/query'
-require 'dm-core/query/conditions/operation'
-require 'dm-core/query/conditions/comparison'
-require 'dm-core/query/operator'
-require 'dm-core/query/direction'
-require 'dm-core/query/path'
-require 'dm-core/query/sort'
 require 'dm-core/repository'
-require 'dm-core/resource'
-require 'dm-core/resource/state'
-require 'dm-core/resource/state/transient'
-require 'dm-core/resource/state/immutable'
-require 'dm-core/resource/state/persisted'
-require 'dm-core/resource/state/clean'
-require 'dm-core/resource/state/deleted'
-require 'dm-core/resource/state/dirty'
+require 'dm-core/adapters'
+require 'dm-core/adapters/abstract_adapter'
+
 require 'dm-core/support/logger'
 require 'dm-core/support/naming_conventions'
 require 'dm-core/version'
@@ -321,11 +283,12 @@ module DataMapper
   end
 
   private
+
   # @api private
   def self.finalize_model(model)
     name            = model.name
     repository_name = model.repository_name
-    relationships   = model.relationships(repository_name).values
+    relationships   = model.relationships(repository_name)
 
     if name.to_s.strip.empty?
       raise IncompleteModelError, "#{model.inspect} must have a name"
@@ -336,15 +299,31 @@ module DataMapper
       raise IncompleteModelError, "#{name} must have at least one property or many to one relationship to be valid"
     end
 
-    # initialize join models and target keys
+    # Initialize all foreign key properties established by relationships
     relationships.each do |relationship|
-      relationship.child_key
-      relationship.through if relationship.respond_to?(:through)
-      relationship.via     if relationship.respond_to?(:via)
+      if relationship.kind_of?(Associations::ManyToOne::Relationship)
+        # Initialize the foreign key property this "many to one"
+        # relationship uses to persist itself
+        relationship.child_key
+      elsif relationship.kind_of?(Associations::ManyToMany::Relationship)
+        # Initialize the chain for "many to many" relationships
+        relationship.through
+        relationship.via
+      else
+        # If this is a "one to one" or "one to many" relationship, initialize
+        # the inverse "many to one" relationships explicitly before initializing
+        # other relationships. This makes sure that foreign key properties always
+        # appear in the order they were declared.
+        relationship.child_model.relationships.each do |remote_relationship|
+          if remote_relationship.kind_of?(Associations::ManyToOne::Relationship)
+            remote_relationship.child_key
+          end
+        end
+      end
     end
 
     if model.key(repository_name).empty?
       raise IncompleteModelError, "#{name} must have a key to be valid"
     end
   end
-end
+end # module DataMapper

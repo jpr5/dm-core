@@ -7,17 +7,21 @@ module DataMapper
 
       protected
 
-      def initialize(model, name, options = {}, type = nil)
+      def initialize(model, name, options = {})
         super
 
-        unless @scale.nil?
-          unless @scale >= 0
-            raise ArgumentError, "scale must be equal to or greater than 0, but was #{@scale.inspect}"
+        [ :scale, :precision ].each do |key|
+          unless options.key?(key)
+            warn "options[#{key.inspect}] should be set for #{self.class}, defaulting to #{send(key).inspect}"
           end
+        end
 
-          unless @precision >= @scale
-            raise ArgumentError, "precision must be equal to or greater than scale, but was #{@precision.inspect} and scale was #{scale_inspect}"
-          end
+        unless @scale >= 0
+          raise ArgumentError, "scale must be equal to or greater than 0, but was #{@scale.inspect}"
+        end
+
+        unless @precision >= @scale
+          raise ArgumentError, "precision must be equal to or greater than scale, but was #{@precision.inspect} and scale was #{@scale.inspect}"
         end
       end
 
@@ -32,7 +36,6 @@ module DataMapper
       # @api private
       def typecast_to_primitive(value)
         if value.kind_of?(::Integer)
-          # TODO: remove this case when Integer#to_d added by extlib
           value.to_s.to_d
         else
           typecast_to_numeric(value, :to_d)

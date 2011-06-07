@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', '..', 'spec_helper'))
+require 'spec_helper'
 
 describe DataMapper::Resource::State do
   before :all do
@@ -181,9 +181,7 @@ describe DataMapper::Resource::State do
   describe '#hash' do
     subject { @state.hash }
 
-    it 'should be the hash of the resource' do
-      should == @resource.hash
-    end
+    it { should == @state.class.hash ^ @resource.hash }
   end
 
   describe '#resource' do

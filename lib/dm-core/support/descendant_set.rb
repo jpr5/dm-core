@@ -7,19 +7,15 @@ module DataMapper
     # @param [#to_ary] descendants
     #   initialize with the descendants
     #
-    # @return [undefined]
-    #
     # @api private
     def initialize(descendants = [])
-      @descendants = descendants.to_ary
+      @descendants = SubjectSet.new(descendants)
     end
 
     # Copy a DescendantSet instance
     #
     # @param [DescendantSet] original
     #   the original descendants
-    #
-    # @return [undefined]
     #
     # @api private
     def initialize_copy(original)
@@ -78,6 +74,15 @@ module DataMapper
     # @api private
     def empty?
       @descendants.empty?
+    end
+
+    # Removes all entries and returns self
+    #
+    # @return [DescendantSet] self
+    #
+    # @api private
+    def clear
+      @descendants.clear
     end
 
   end # class DescendantSet

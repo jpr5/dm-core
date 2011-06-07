@@ -1,44 +1,30 @@
-# TODO: add Model#create!, Model#update, Model#update!, Model#destroy and Model#destroy!
-
-# TODO: DRY up raise_on_save_failure with attr_accessor_with_default
-# once AS branch is merged in
-
 module DataMapper
   module Model
     extend Chainable
 
     include Enumerable
 
-    # Creates a new Model class with default_storage_name +storage_name+
+    # Creates a new Model class with its constant already set
     #
     # If a block is passed, it will be eval'd in the context of the new Model
     #
+    # @param [#to_s] name
+    #   the name of the new model
+    # @param [Object] namespace
+    #   the namespace that will hold the new model
     # @param [Proc] block
     #   a block that will be eval'd in the context of the new Model class
     #
     # @return [Model]
     #   the newly created Model class
     #
-    # @api semipublic
-    def self.new(storage_name = nil, &block)
-      model = Class.new
+    # @api private
+    def self.new(name = nil, namespace = Object, &block)
+      model = name ? namespace.const_set(name, Class.new) : Class.new
 
       model.class_eval <<-RUBY, __FILE__, __LINE__ + 1
         include DataMapper::Resource
-
-        def self.name
-          to_s
-        end
       RUBY
-
-      if storage_name
-        warn "Passing in +storage_name+ to #{name}.new is deprecated (#{caller[0]})"
-        model.class_eval <<-RUBY, __FILE__, __LINE__ + 1
-          def self.default_storage_name
-            #{DataMapper::Inflector.classify(storage_name).inspect}.freeze
-          end
-        RUBY
-      end
 
       model.instance_eval(&block) if block
       model
@@ -573,7 +559,7 @@ module DataMapper
       discriminator   = properties(repository_name).discriminator
       no_reload       = !query.reload?
 
-      field_map = fields.map { |property| [ property, property.field ] }.to_hash
+      field_map = Hash[ fields.map { |property| [ property, property.field ] } ]
 
       records.map do |record|
         identity_map = nil
@@ -716,8 +702,7 @@ module DataMapper
     # @api private
     def const_missing(name)
       if name == :DM
-        warn "#{name} prefix deprecated and no longer necessary (#{caller[0]})"
-        self
+        raise "#{name} prefix deprecated and no longer necessary (#{caller.first})"
       elsif name == :Resource
         Resource
       else
@@ -789,7 +774,7 @@ module DataMapper
 
       # initialize join models and target keys
       @relationships.values.each do |relationships|
-        relationships.values.each do |relationship|
+        relationships.each do |relationship|
           relationship.child_key
           relationship.through if relationship.respond_to?(:through)
           relationship.via     if relationship.respond_to?(:via)

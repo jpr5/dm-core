@@ -1,4 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', '..', 'spec_helper'))
+require 'spec_helper'
 
 # class methods
 describe DataMapper::Query::Path do
@@ -423,6 +423,32 @@ describe DataMapper::Query::Path do
     describe 'when supplied an unknown method name' do
       it 'should raise an error' do
         lambda { @path.unknown }.should raise_error(NoMethodError, "undefined property or relationship 'unknown' on Article")
+      end
+    end
+  end
+
+  describe 'ordering' do
+    before do
+      @path = Article.author.title
+    end
+
+    describe '#desc' do
+      before do
+        @return = @path.desc
+      end
+
+      it 'returns a :desc operator from the path' do
+        @return.should == DataMapper::Query::Operator.new(@path.property, :desc)
+      end
+    end
+
+    describe '#asc' do
+      before do
+        @return = @path.asc
+      end
+
+      it 'returns a :desc operator from the path' do
+        @return.should == DataMapper::Query::Operator.new(@path.property, :asc)
       end
     end
   end

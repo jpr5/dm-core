@@ -1,5 +1,3 @@
-require 'dm-core/property/typecast/numeric'
-
 module DataMapper
   class Property
     class Numeric < Object
@@ -15,10 +13,10 @@ module DataMapper
 
       protected
 
-      def initialize(model, name, options = {}, type = nil)
+      def initialize(model, name, options = {})
         super
 
-        if [ BigDecimal, ::Float ].include?(@primitive)
+        if @primitive == BigDecimal || @primitive == ::Float
           @precision = @options.fetch(:precision, DEFAULT_PRECISION)
           @scale     = @options.fetch(:scale,     self.class::DEFAULT_SCALE)
 
@@ -27,7 +25,7 @@ module DataMapper
           end
         end
 
-        if (@options.keys & [ :min, :max ]).any?
+        if @options.key?(:min) || @options.key?(:max)
           @min = @options.fetch(:min, DEFAULT_NUMERIC_MIN)
           @max = @options.fetch(:max, DEFAULT_NUMERIC_MAX)
 

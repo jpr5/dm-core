@@ -11,6 +11,7 @@ module DataMapper
 
       def initialize(resource)
         @resource = resource
+        @model    = resource.model
       end
 
       def get(subject, *args)
@@ -36,16 +37,14 @@ module DataMapper
 
     private
 
-      def model
-        @model ||= resource.model
-      end
+      attr_reader :model
 
       def properties
         @properties ||= model.properties(repository.name)
       end
 
       def relationships
-        @relationships ||= model.relationships(repository.name).values
+        @relationships ||= model.relationships(repository.name)
       end
 
       def identity_map

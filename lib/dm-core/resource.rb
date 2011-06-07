@@ -1,30 +1,21 @@
-# TODO: DRY up raise_on_save_failure with attr_accessor_with_default
-# once AS branch is merged in
-
 module DataMapper
   module Resource
     include DataMapper::Assertions
     extend Chainable
-    extend Deprecate
-
-    deprecate :new_record?, :new?
 
     # @deprecated
     def self.append_inclusions(*inclusions)
-      warn "DataMapper::Resource.append_inclusions is deprecated, use DataMapper::Model.append_inclusions instead (#{caller[0]})"
-      Model.append_inclusions(*inclusions)
+      raise "DataMapper::Resource.append_inclusions is deprecated, use DataMapper::Model.append_inclusions instead (#{caller.first})"
     end
 
     # @deprecated
     def self.extra_inclusions
-      warn "DataMapper::Resource.extra_inclusions is deprecated, use DataMapper::Model.extra_inclusions instead (#{caller[0]})"
-      Model.extra_inclusions
+      raise "DataMapper::Resource.extra_inclusions is deprecated, use DataMapper::Model.extra_inclusions instead (#{caller.first})"
     end
 
     # @deprecated
     def self.descendants
-      warn "DataMapper::Resource.descendants is deprecated, use DataMapper::Model.descendants instead (#{caller[0]})"
-      Model.descendants
+      raise "DataMapper::Resource.descendants is deprecated, use DataMapper::Model.descendants instead (#{caller.first})"
     end
 
     # Return if Resource#save should raise an exception on save failures (per-resource)
@@ -64,22 +55,17 @@ module DataMapper
     #
     # @deprecated
     def update_attributes(attributes = {}, *allowed)
-      model      = self.model
-      call_stack = caller[0]
-
-      warn "#{model}#update_attributes is deprecated, use #{model}#update instead (#{call_stack})"
-
-      if allowed.any?
-        warn "specifying allowed in #{model}#update_attributes is deprecated, " \
-          "use Hash#only to filter the attributes in the caller (#{call_stack})"
-        attributes = attributes.only(*allowed)
-      end
-
-      assert_update_clean_only(:update_attributes)
-      update(attributes)
+      raise "#{model}#update_attributes is deprecated, use #{model}#update instead (#{caller.first})"
     end
 
     # Makes sure a class gets all the methods when it includes Resource
+    #
+    # Note that including this module into an anonymous class will leave
+    # the model descendant tracking mechanism with no possibility to reliably
+    # track the anonymous model across code reloads. This means that
+    # {DataMapper::DescendantSet} will currently leak memory in scenarios where
+    # anonymous models are reloaded multiple times (as is the case in dm-rails
+    # development mode for example).
     #
     # @api private
     def self.included(model)
@@ -251,7 +237,8 @@ module DataMapper
     #
     # @api public
     def attribute_get(name)
-      persisted_state.get(properties[name])
+      property = properties[name]
+      persisted_state.get(property) if property
     end
 
     alias_method :[], :attribute_get
@@ -292,7 +279,8 @@ module DataMapper
     #
     # @api public
     def attribute_set(name, value)
-      self.persisted_state = persisted_state.set(properties[name], value)
+      property = properties[name]
+      self.persisted_state = persisted_state.set(property, value) if property
     end
 
     alias_method :[]=, :attribute_set
@@ -358,7 +346,7 @@ module DataMapper
     # original value, and then removing all the ivars for properties
     # and relationships.  On the next access of those ivars, the
     # resource will eager load what it needs.  While this is more of
-    # a lazy reload, it should result is more consistent behavior
+    # a lazy reload, it should result in more consistent behavior
     # since no cached results will remain from the initial load.
     #
     # @return [Resource]
@@ -530,7 +518,7 @@ module DataMapper
     #
     # @api private
     def hash
-      key.hash
+      model.hash ^ key.hash
     end
 
     # Get a Human-readable representation of this Resource instance
@@ -616,7 +604,7 @@ module DataMapper
       dirty_attributes = {}
 
       original_attributes.each_key do |property|
-        next unless property.respond_to?(:value)
+        next unless property.respond_to?(:dump)
         dirty_attributes[property] = property.dump(property.get!(self))
       end
 
@@ -763,7 +751,7 @@ module DataMapper
     # @api private
     def initialize_copy(original)
       instance_variables.each do |ivar|
-        instance_variable_set(ivar, instance_variable_get(ivar).try_dup)
+        instance_variable_set(ivar, DataMapper::Ext.try_dup(instance_variable_get(ivar)))
       end
 
       self.persisted_state = persisted_state.class.new(self)
@@ -782,7 +770,7 @@ module DataMapper
 
     # Gets this instance's Model's properties
     #
-    # @return [Array(Property)]
+    # @return [PropertySet]
     #   List of this Resource's Model's properties
     #
     # @api private
@@ -792,7 +780,7 @@ module DataMapper
 
     # Gets this instance's Model's relationships
     #
-    # @return [Array(Associations::Relationship)]
+    # @return [RelationshipSet]
     #   List of this instance's Model's Relationships
     #
     # @api private
@@ -852,7 +840,7 @@ module DataMapper
     def clear_subjects
       model_properties = properties
 
-      (model_properties - model_properties.key | relationships.values).each do |subject|
+      (model_properties - model_properties.key | relationships).each do |subject|
         next unless subject.loaded?(self)
         remove_instance_variable(subject.instance_variable_name)
       end
@@ -914,7 +902,7 @@ module DataMapper
     def parent_relationships
       parent_relationships = []
 
-      relationships.each_value do |relationship|
+      relationships.each do |relationship|
         next unless relationship.respond_to?(:resource_for)
         set_default_value(relationship)
         next unless relationship.loaded?(self) && relationship.get!(self)
@@ -934,7 +922,7 @@ module DataMapper
     def child_relationships
       child_relationships = []
 
-      relationships.each_value do |relationship|
+      relationships.each do |relationship|
         next unless relationship.respond_to?(:collection_for)
         set_default_value(relationship)
         next unless relationship.loaded?(self)
@@ -1070,7 +1058,7 @@ module DataMapper
     # Checks if the resource has unsaved changes
     #
     # @return [Boolean]
-    #  true if the resource has unsaged changes
+    #  true if the resource has unsaved changes
     #
     # @api semipublic
     def dirty_self?

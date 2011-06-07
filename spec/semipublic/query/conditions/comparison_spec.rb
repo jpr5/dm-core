@@ -1,5 +1,4 @@
-require File.expand_path(File.join(File.dirname(__FILE__), '..', '..', '..', 'spec_helper'))
-
+require 'spec_helper'
 describe DataMapper::Query::Conditions::Comparison do
   before :all do
     module ::Blog
@@ -150,7 +149,7 @@ describe DataMapper::Query::Conditions::EqualToComparison do
       end
 
       describe 'with a Relationship subject' do
-        describe 'with a Relationship subject and a nil value' do
+        describe 'with a nil value' do
           before do
             @parent = @model.create(:title => 'Parent')
             @child  = @parent.children.create(:title => 'Child')
@@ -183,7 +182,7 @@ describe DataMapper::Query::Conditions::EqualToComparison do
           end
         end
 
-        describe 'with a Relationship subject and a Hash value' do
+        describe 'with a Hash value' do
           before do
             @parent = @model.create(:title => 'Parent')
             @child  = @parent.children.create(:title => 'Child')
@@ -216,7 +215,7 @@ describe DataMapper::Query::Conditions::EqualToComparison do
           end
         end
 
-        describe 'with a Relationship subject and new Resource value' do
+        describe 'with new Resource value' do
           before do
             @parent = @model.create(:title => 'Parent')
             @child  = @parent.children.create(:title => 'Child')
@@ -251,7 +250,7 @@ describe DataMapper::Query::Conditions::EqualToComparison do
           end
         end
 
-        describe 'with a Relationship subject and saved Resource value' do
+        describe 'with a saved Resource value' do
           before do
             @parent = @model.create(:title => 'Parent')
             @child  = @parent.children.create(:title => 'Child')
@@ -1195,6 +1194,16 @@ describe DataMapper::Query::Conditions::GreaterThanComparison do
 
         it { should be(false) }
       end
+
+      describe 'with an expected value of nil' do
+        subject { @comparison.matches?(@model.new(@property => 2)) }
+
+        before do
+          @comparison = DataMapper::Query::Conditions::Comparison.new(@slug, @property, nil)
+        end
+
+        it { should be(false) }
+      end
     end
   end
 
@@ -1274,6 +1283,16 @@ describe DataMapper::Query::Conditions::LessThanComparison do
 
       describe 'with a not matching nil attribute' do
         subject { @comparison.matches?(@model.new(@property => nil)) }
+
+        it { should be(false) }
+      end
+
+      describe 'with an expected value of nil' do
+        subject { @comparison.matches?(@model.new(@property => 0)) }
+
+        before do
+          @comparison = DataMapper::Query::Conditions::Comparison.new(@slug, @property, nil)
+        end
 
         it { should be(false) }
       end
@@ -1359,6 +1378,16 @@ describe DataMapper::Query::Conditions::GreaterThanOrEqualToComparison do
 
         it { should be(false) }
       end
+
+      describe 'with an expected value of nil' do
+        subject { @comparison.matches?(@model.new(@property => 1)) }
+
+        before do
+          @comparison = DataMapper::Query::Conditions::Comparison.new(@slug, @property, nil)
+        end
+
+        it { should be(false) }
+      end
     end
   end
 
@@ -1438,6 +1467,16 @@ describe DataMapper::Query::Conditions::LessThanOrEqualToComparison do
 
       describe 'with a not matching nil attribute' do
         subject { @comparison.matches?(@model.new(@property => nil)) }
+
+        it { should be(false) }
+      end
+
+      describe 'with an expected value of nil' do
+        subject { @comparison.matches?(@model.new(@property => 1)) }
+
+        before do
+          @comparison = DataMapper::Query::Conditions::Comparison.new(@slug, @property, nil)
+        end
 
         it { should be(false) }
       end
